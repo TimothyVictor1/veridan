@@ -169,8 +169,8 @@ function BodyTwin3D({ med90 }) {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
-    camera.position.set(0, 0.1, zoomRef.current);
-    camera.lookAt(0, 0.1, 0);
+    camera.position.set(0, 0, zoomRef.current);
+    camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -217,13 +217,16 @@ function BodyTwin3D({ med90 }) {
         });
 
         // scale to a consistent on-screen height
+        model.updateMatrixWorld(true);
         const box0 = new THREE.Box3().setFromObject(model);
         const size = new THREE.Vector3(); box0.getSize(size);
-        const targetH = 3.0;
+        const targetH = 2.8;
         const s = targetH / size.y;
         model.scale.setScalar(s);
 
-        // center the (scaled) model at the origin, then face it toward the camera
+        // center the (scaled) model at the origin — recompute AFTER scaling so the
+        // world matrix reflects the new scale (otherwise it ends up off-centre)
+        model.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(model);
         const center = new THREE.Vector3(); box.getCenter(center);
         model.position.sub(center);            // geometry centered at pivot origin
@@ -239,11 +242,17 @@ function BodyTwin3D({ med90 }) {
         tumorLight.position.copy(chest);
         root.add(glowOuter, glowCore, tumorLight);
 
-        // subtle idle motion so it reads as alive, not a statue
+        // play the idle clip for an arms-down, gently-breathing pose — but strip
+        // the root/hip *position* tracks first, since they translate the whole
+        // skinned mesh off the (static) bounding box we centred on. Keeping only
+        // the rotation tracks lets the body sway in place while staying centred.
         if (gltf.animations && gltf.animations.length) {
-          mixer = new THREE.AnimationMixer(model);
           const idle = gltf.animations.find((c) => /idle/i.test(c.name)) || gltf.animations[0];
-          mixer.clipAction(idle).play();
+          const clip = idle.clone();
+          clip.tracks = clip.tracks.filter((t) => !t.name.endsWith(".position"));
+          mixer = new THREE.AnimationMixer(model);
+          mixer.clipAction(clip).play();
+          mixer.update(0.4); // settle into the pose immediately
         }
       },
       undefined,
