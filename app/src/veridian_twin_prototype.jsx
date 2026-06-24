@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Activity, Check, FlaskConical, Plus, RefreshCw, Search, Sparkles, X } from "lucide-react";
 
@@ -26,6 +26,10 @@ const CHEMICALS = [
   { id: "lymphorin", name: "Lymphorin", code: "LYM-04", className: "lymphatic tracer", color: "teal", note: "diagnostic signal only" },
 ];
 
+// shared panel chrome — frosted dark glass with a soft drop shadow
+const PANEL = "rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-xl shadow-[0_10px_40px_-12px_rgba(0,0,0,0.7)]";
+const EYEBROW = "text-[10px] font-mono uppercase tracking-[0.18em] text-slate-400";
+
 function sortIds(ids) {
   return [...ids].sort().join("|");
 }
@@ -34,20 +38,21 @@ function isPassingCombo(selected) {
   return sortIds(selected.map((item) => item.id)) === sortIds(PASSING_COMBO);
 }
 
+// dark-glass chip styling per compound color
 function colorClasses(color) {
   const map = {
-    amber: "border-amber-200 bg-amber-50 text-amber-800",
-    blue: "border-blue-200 bg-blue-50 text-blue-800",
-    cyan: "border-cyan-200 bg-cyan-50 text-cyan-800",
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-800",
-    lime: "border-lime-200 bg-lime-50 text-lime-800",
-    orange: "border-orange-200 bg-orange-50 text-orange-800",
-    rose: "border-rose-200 bg-rose-50 text-rose-800",
-    sky: "border-sky-200 bg-sky-50 text-sky-800",
-    teal: "border-teal-200 bg-teal-50 text-teal-800",
-    violet: "border-violet-200 bg-violet-50 text-violet-800",
+    amber: "border-amber-400/30 bg-amber-400/10 text-amber-200",
+    blue: "border-blue-400/30 bg-blue-400/10 text-blue-200",
+    cyan: "border-cyan-400/30 bg-cyan-400/10 text-cyan-200",
+    emerald: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
+    lime: "border-lime-400/30 bg-lime-400/10 text-lime-200",
+    orange: "border-orange-400/30 bg-orange-400/10 text-orange-200",
+    rose: "border-rose-400/30 bg-rose-400/10 text-rose-200",
+    sky: "border-sky-400/30 bg-sky-400/10 text-sky-200",
+    teal: "border-teal-400/30 bg-teal-400/10 text-teal-200",
+    violet: "border-violet-400/30 bg-violet-400/10 text-violet-200",
   };
-  return map[color] || "border-slate-200 bg-slate-50 text-slate-800";
+  return map[color] || "border-slate-500/30 bg-slate-500/10 text-slate-200";
 }
 
 function BodyTwin3D({ phase, isDragOver, onDrop, onDragOver, onDragLeave }) {
@@ -215,28 +220,42 @@ function BodyTwin3D({ phase, isDragOver, onDrop, onDragOver, onDragLeave }) {
     };
   }, []);
 
+  const phaseLabel = phase === "scanning" ? "scanning" : phase === "testing" ? "compound trial" : phase === "passed" ? "trial complete" : phase === "failed" ? "trial complete" : "ready";
+
   return (
     <div
       data-testid="body-drop-target"
-      className={(isDragOver ? "border-cyan-200 bg-cyan-300/10" : "border-white/10 bg-black/20") + " relative min-h-[640px] overflow-hidden rounded-lg border transition"}
+      className={(isDragOver ? "border-cyan-300/60 bg-cyan-300/10" : "border-white/10 bg-transparent") + " relative min-h-[640px] overflow-hidden rounded-2xl border transition-colors duration-300"}
       onDrop={onDrop}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
     >
-      <div className="stage-grid absolute inset-0 opacity-60" />
+      {/* ambient radial glow halo behind the twin */}
+      <div className="pointer-events-none absolute left-1/2 top-1/2 z-0 h-[80%] w-[80%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(34,211,238,0.22),rgba(13,148,136,0.10)_38%,transparent_68%)] blur-2xl" />
+      <div className="stage-grid absolute inset-0 z-0 opacity-50" />
+
+      {/* HUD overlays */}
       <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-3 p-4">
-        <div className="rounded-md border border-cyan-200/25 bg-slate-950/70 px-3 py-2 text-white backdrop-blur">
-          <div className="text-xs text-cyan-200">3D body twin</div>
-          <div className="font-mono text-sm">{phase === "scanning" ? "scanning" : phase === "testing" ? "compound trial" : "ready"}</div>
+        <div className="rounded-xl border border-cyan-300/20 bg-slate-950/60 px-3 py-2 text-white backdrop-blur-md">
+          <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-cyan-300/80">3D body twin</div>
+          <div className="mt-0.5 flex items-center gap-1.5 font-mono text-sm">
+            <span className={(phase === "scanning" || phase === "testing" ? "bg-cyan-400 animate-pulse" : phase === "passed" ? "bg-emerald-400" : phase === "failed" ? "bg-rose-400" : "bg-slate-400") + " h-1.5 w-1.5 rounded-full"} />
+            {phaseLabel}
+          </div>
         </div>
-        <div className="rounded-md border border-white/10 bg-slate-950/70 px-3 py-2 text-right text-white backdrop-blur">
-          <div className="text-xs text-slate-400">drop target</div>
-          <div className="font-mono text-sm">thoracic anomaly</div>
+        <div className="rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-right text-white backdrop-blur-md">
+          <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-slate-400">drop target</div>
+          <div className="mt-0.5 font-mono text-sm text-amber-300">thoracic anomaly</div>
         </div>
       </div>
+
       {phase === "scanning" && <div className="scan-sweep absolute inset-x-8 top-10 z-20 h-1 rounded-full bg-cyan-200 shadow-[0_0_28px_rgba(103,232,249,0.95)]" />}
-      {isDragOver && <div className="absolute inset-4 z-20 rounded-lg border border-cyan-200 bg-cyan-200/10 shadow-[0_0_40px_rgba(103,232,249,0.35)]" />}
-      <div ref={mountRef} className="absolute inset-0 z-0" />
+      {isDragOver && (
+        <div className="absolute inset-4 z-20 grid place-items-center rounded-2xl border border-cyan-300/70 bg-cyan-300/10 shadow-[0_0_60px_rgba(103,232,249,0.4)]">
+          <span className="rounded-full border border-cyan-200/40 bg-slate-950/70 px-4 py-1.5 font-mono text-xs uppercase tracking-[0.2em] text-cyan-200">release to test</span>
+        </div>
+      )}
+      <div ref={mountRef} className="absolute inset-0 z-[5]" />
     </div>
   );
 }
@@ -249,18 +268,18 @@ function ChemicalSearch({ query, setQuery, selected, addChemical }) {
   }, [query]);
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <section className={PANEL + " p-4"}>
       <div className="mb-3 flex items-center gap-2">
-        <Search className="h-4 w-4 text-cyan-700" />
-        <h2 className="text-sm font-semibold text-slate-800">Chemical search</h2>
+        <Search className="h-3.5 w-3.5 text-cyan-400" />
+        <h2 className={EYEBROW}>Compound search</h2>
       </div>
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search NanoClear, immune, stabilizer..."
-          className="h-11 w-full rounded-md border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-2 focus:ring-cyan-100"
+          className="h-11 w-full rounded-xl border border-white/10 bg-black/30 pl-9 pr-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-cyan-400/50 focus:bg-black/50 focus:ring-2 focus:ring-cyan-400/20"
         />
       </div>
       <div className="mt-3 grid gap-2">
@@ -272,13 +291,13 @@ function ChemicalSearch({ query, setQuery, selected, addChemical }) {
               type="button"
               onClick={() => addChemical(chemical)}
               disabled={alreadySelected}
-              className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left transition hover:border-cyan-200 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="group grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-left transition hover:border-cyan-400/30 hover:bg-cyan-400/[0.06] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
             >
               <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold text-slate-900">{chemical.name}</span>
-                <span className="mt-0.5 block truncate text-xs text-slate-500">{chemical.code} / {chemical.className}</span>
+                <span className="block truncate text-sm font-semibold text-slate-100">{chemical.name}</span>
+                <span className="mt-0.5 block truncate font-mono text-[11px] text-slate-500">{chemical.code} · {chemical.className}</span>
               </span>
-              <span className={(alreadySelected ? "border-slate-200 bg-slate-100 text-slate-400" : colorClasses(chemical.color)) + " grid h-8 w-8 place-items-center rounded-md border"}>
+              <span className={(alreadySelected ? "border-white/10 bg-white/5 text-slate-500" : colorClasses(chemical.color)) + " grid h-8 w-8 place-items-center rounded-lg border transition group-hover:scale-105"}>
                 {alreadySelected ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
               </span>
             </button>
@@ -291,29 +310,31 @@ function ChemicalSearch({ query, setQuery, selected, addChemical }) {
 
 function ComboShelf({ selected, removeChemical, clearCombo, startDrag, canTest, onQuickTest }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <section className={PANEL + " p-4"}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <FlaskConical className="h-4 w-4 text-cyan-700" />
-          <h2 className="text-sm font-semibold text-slate-800">Selected combination</h2>
+          <FlaskConical className="h-3.5 w-3.5 text-cyan-400" />
+          <h2 className={EYEBROW}>Selected combination</h2>
         </div>
-        <button type="button" onClick={clearCombo} className="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Clear selected chemicals"><RefreshCw className="h-4 w-4" /></button>
+        <button type="button" onClick={clearCombo} className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/5 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40" aria-label="Clear selected chemicals"><RefreshCw className="h-4 w-4" /></button>
       </div>
 
       <div
         data-testid="combo-shelf"
         draggable={selected.length > 0}
         onDragStart={startDrag}
-        className={(selected.length > 0 ? "cursor-grab border-cyan-200 bg-cyan-50" : "border-dashed border-slate-200 bg-slate-50") + " min-h-32 rounded-md border p-3 transition active:cursor-grabbing"}
+        className={(selected.length > 0 ? "cursor-grab border-cyan-400/30 bg-cyan-400/[0.06]" : "border-dashed border-white/10 bg-black/20") + " min-h-32 rounded-xl border p-3 transition active:cursor-grabbing"}
       >
         {selected.length === 0 ? (
-          <div className="grid h-24 place-items-center text-center text-sm text-slate-400">No chemicals selected</div>
+          <div className="grid h-24 place-items-center text-center text-sm text-slate-500">
+            Tap compounds to build a combination,<br />then drag it onto the twin.
+          </div>
         ) : (
           <div className="flex flex-wrap gap-2">
             {selected.map((chemical) => (
-              <span key={chemical.id} className={(colorClasses(chemical.color)) + " inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs font-semibold"}>
+              <span key={chemical.id} className={(colorClasses(chemical.color)) + " inline-flex max-w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-semibold"}>
                 <span className="truncate">{chemical.name}</span>
-                <button type="button" onClick={(event) => { event.stopPropagation(); removeChemical(chemical.id); }} className="rounded-sm p-0.5 hover:bg-white/70" aria-label={`Remove ${chemical.name}`}><X className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={(event) => { event.stopPropagation(); removeChemical(chemical.id); }} className="rounded-sm p-0.5 transition hover:bg-white/15" aria-label={`Remove ${chemical.name}`}><X className="h-3.5 w-3.5" /></button>
               </span>
             ))}
           </div>
@@ -324,7 +345,7 @@ function ComboShelf({ selected, removeChemical, clearCombo, startDrag, canTest, 
         type="button"
         onClick={onQuickTest}
         disabled={!canTest}
-        className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-slate-950 px-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
+        className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-teal-500 px-3 text-sm font-semibold text-white shadow-[0_0_22px_-4px_rgba(34,211,238,0.6)] transition hover:shadow-[0_0_30px_-2px_rgba(34,211,238,0.75)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 disabled:cursor-not-allowed disabled:from-slate-700 disabled:to-slate-700 disabled:text-slate-400 disabled:shadow-none"
       >
         <Sparkles className="h-4 w-4" />
         Test selected combo
@@ -336,44 +357,44 @@ function ComboShelf({ selected, removeChemical, clearCombo, startDrag, canTest, 
 function StatusPanel({ scanComplete, phase, result, selected, resetScan }) {
   const selectedNames = selected.map((item) => item.name).join(" + ") || "none";
   return (
-    <aside className="grid gap-4">
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <aside className="grid content-start gap-4">
+      <section className={PANEL + " p-4"}>
         <div className="mb-3 flex items-center gap-2">
-          <Activity className="h-4 w-4 text-cyan-700" />
-          <h2 className="text-sm font-semibold text-slate-800">Scan status</h2>
+          <Activity className="h-3.5 w-3.5 text-cyan-400" />
+          <h2 className={EYEBROW}>Scan status</h2>
         </div>
         <div className="space-y-3">
           <ProgressRow label="Nanobot sweep" value={scanComplete ? 100 : 64} active={!scanComplete} />
           <ProgressRow label="Twin alignment" value={scanComplete ? 96 : 58} active={!scanComplete} />
           <ProgressRow label="Anomaly lock" value={scanComplete ? 94 : 31} active={!scanComplete} />
         </div>
-        <button type="button" onClick={resetScan} className="mt-4 flex h-9 w-full items-center justify-center gap-2 rounded-md border border-slate-200 bg-white text-sm font-semibold text-slate-700 transition hover:bg-slate-50"><RefreshCw className="h-4 w-4" />Restart scan</button>
+        <button type="button" onClick={resetScan} className="mt-4 flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] text-sm font-semibold text-slate-300 transition hover:bg-white/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"><RefreshCw className="h-4 w-4" />Restart scan</button>
       </section>
 
-      <section className={(scanComplete ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white") + " rounded-lg border p-4 shadow-sm"}>
-        <div className="text-xs text-slate-500">Disease found</div>
+      <section className={(scanComplete ? "border-amber-400/30 bg-amber-400/[0.07]" : "border-white/10 bg-white/[0.035]") + " rounded-2xl border p-4 backdrop-blur-xl shadow-[0_10px_40px_-12px_rgba(0,0,0,0.7)]"}>
+        <div className={EYEBROW}>Disease found</div>
         {scanComplete ? (
           <div className="mt-2">
-            <div className="text-lg font-bold text-slate-950">{DISEASE.name}</div>
-            <div className="mt-1 text-sm text-slate-700">{DISEASE.site}</div>
+            <div className="text-lg font-bold tracking-tight text-white">{DISEASE.name}</div>
+            <div className="mt-1 text-sm text-slate-300">{DISEASE.site}</div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-md bg-white/70 p-2"><span className="block text-slate-500">Severity</span><span className="font-semibold text-amber-800">{DISEASE.severity}</span></div>
-              <div className="rounded-md bg-white/70 p-2"><span className="block text-slate-500">Confidence</span><span className="font-mono font-semibold text-slate-900">{DISEASE.confidence}%</span></div>
+              <div className="rounded-lg border border-white/5 bg-black/20 p-2"><span className="block text-slate-500">Severity</span><span className="font-semibold text-amber-300">{DISEASE.severity}</span></div>
+              <div className="rounded-lg border border-white/5 bg-black/20 p-2"><span className="block text-slate-500">Confidence</span><span className="font-mono font-semibold text-white">{DISEASE.confidence}%</span></div>
             </div>
           </div>
         ) : (
-          <div className="mt-2 text-sm text-slate-500">Scanning body twin...</div>
+          <div className="mt-2 flex items-center gap-2 text-sm text-slate-400"><span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />Scanning body twin...</div>
         )}
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-2 text-xs text-slate-500">Current payload</div>
-        <div className="min-h-10 rounded-md bg-slate-50 p-3 text-sm font-semibold text-slate-800">{selectedNames}</div>
-        {phase === "testing" && <div className="mt-3 rounded-md border border-cyan-200 bg-cyan-50 p-3 text-sm font-semibold text-cyan-800">Testing on digital twin...</div>}
+      <section className={PANEL + " p-4"}>
+        <div className={EYEBROW + " mb-2"}>Current payload</div>
+        <div className="min-h-10 rounded-xl border border-white/5 bg-black/25 p-3 text-sm font-semibold text-slate-200">{selectedNames}</div>
+        {phase === "testing" && <div className="mt-3 flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 p-3 text-sm font-semibold text-cyan-200"><span className="h-1.5 w-1.5 rounded-full bg-cyan-300 animate-pulse" />Testing on digital twin...</div>}
         {result && (
-          <div data-testid="test-result" className={(result.passed ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-800") + " mt-3 rounded-md border p-3"}>
+          <div data-testid="test-result" className={(result.passed ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-rose-400/30 bg-rose-400/10 text-rose-200") + " mt-3 rounded-xl border p-3"}>
             <div className="flex items-center gap-2 text-sm font-bold">{result.passed ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}{result.passed ? "Combination passed" : "Combination failed"}</div>
-            <p className="mt-1 text-xs leading-5">{result.message}</p>
+            <p className="mt-1 text-xs leading-5 text-slate-300">{result.message}</p>
           </div>
         )}
       </section>
@@ -384,8 +405,8 @@ function StatusPanel({ scanComplete, phase, result, selected, resetScan }) {
 function ProgressRow({ label, value, active }) {
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between text-xs"><span className="text-slate-500">{label}</span><span className="font-mono text-slate-800">{value}%</span></div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={(active ? "scan-progress" : "bg-cyan-500") + " h-full rounded-full"} style={{ width: `${value}%` }} /></div>
+      <div className="mb-1 flex items-center justify-between text-xs"><span className="text-slate-400">{label}</span><span className="font-mono text-slate-200">{value}%</span></div>
+      <div className="h-2 overflow-hidden rounded-full bg-white/5"><div className={(active ? "scan-progress" : "bg-cyan-500 shadow-[0_0_10px_rgba(34,211,238,0.6)]") + " h-full rounded-full"} style={{ width: `${value}%` }} /></div>
     </div>
   );
 }
@@ -477,14 +498,31 @@ export default function VeridianTwin() {
   const canTest = scanComplete && selected.length > 0 && phase !== "testing";
 
   return (
-    <div className="min-h-screen bg-[#f3f7f8] text-slate-900">
-      <div className="mx-auto grid w-full max-w-[1600px] gap-5 p-4 sm:p-6">
-        <header className="flex flex-wrap items-center justify-between gap-3">
+    <div className="relative min-h-screen bg-[#060b0f] text-slate-100 selection:bg-cyan-400/30">
+      {/* ambient background glow */}
+      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        <div className="absolute left-1/2 top-[-12%] h-[55vh] w-[55vh] -translate-x-1/2 rounded-full bg-cyan-500/10 blur-[130px]" />
+        <div className="absolute bottom-[-15%] right-[6%] h-[42vh] w-[42vh] rounded-full bg-teal-500/10 blur-[130px]" />
+        <div className="absolute bottom-[-10%] left-[2%] h-[34vh] w-[34vh] rounded-full bg-amber-500/[0.06] blur-[120px]" />
+      </div>
+
+      <div className="relative z-10 mx-auto grid w-full max-w-[1600px] gap-5 p-4 sm:p-6">
+        <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 backdrop-blur-xl shadow-[0_10px_40px_-12px_rgba(0,0,0,0.7)]">
           <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-lg bg-slate-950"><Activity className="h-5 w-5 text-cyan-200" /></div>
-            <div><div className="text-xl font-bold leading-none text-slate-950">Veridian</div><div className="mt-1 text-xs leading-none text-slate-500">interactive digital twin testing prototype</div></div>
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-cyan-400 to-teal-600 shadow-[0_0_22px_-2px_rgba(34,211,238,0.7)]">
+              <Activity className="h-5 w-5 text-white" strokeWidth={2.5} />
+            </div>
+            <div>
+              <div className="text-xl font-bold leading-none tracking-tight text-white">Veridian</div>
+              <div className="mt-1 text-[11px] leading-none tracking-wide text-cyan-300/70">Interactive digital-twin testing lab</div>
+            </div>
           </div>
-          <span className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500 shadow-sm">Fictional demo / simulated disease / fake chemicals</span>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-emerald-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> live
+            </span>
+            <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] tracking-wide text-slate-400">Fictional demo · simulated disease · fake chemicals</span>
+          </div>
         </header>
 
         <main className="grid gap-5 xl:grid-cols-[360px_minmax(520px,1fr)_360px]">
@@ -493,12 +531,17 @@ export default function VeridianTwin() {
             <ComboShelf selected={selected} removeChemical={removeChemical} clearCombo={clearCombo} startDrag={startDrag} canTest={canTest} onQuickTest={runTest} />
           </div>
 
-          <section className="rounded-lg border border-slate-900 bg-[#071014] p-3 shadow-2xl">
+          <section className="relative rounded-2xl border border-cyan-400/15 bg-[#040809] p-3 shadow-[0_0_80px_-20px_rgba(34,211,238,0.25)]">
+            <div className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/5" />
             <BodyTwin3D phase={phase} isDragOver={isDragOver} onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={() => setIsDragOver(false)} />
           </section>
 
           <StatusPanel scanComplete={scanComplete} phase={phase} result={result} selected={selected} resetScan={resetScan} />
         </main>
+
+        <footer className="text-center text-[10px] tracking-wide text-slate-600">
+          Research prototype · simulated data · not for clinical use
+        </footer>
       </div>
     </div>
   );
