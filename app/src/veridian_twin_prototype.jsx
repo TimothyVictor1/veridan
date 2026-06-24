@@ -146,11 +146,21 @@ const GLASS = "rounded-2xl bg-white/65 backdrop-blur-md shadow-[0_8px_24px_-12px
 const EYEBROW = "text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400";
 const C_ORANGE = "#f26a3a", C_ORANGE_SOFT = "#f7a06f", C_ACTUAL = "#334155", C_BASE = "#c9c6c2", C_GREEN = "#10b981";
 
-/* ───────── 3D body + tumor twin (procedural, light theme) ───────── */
+/* ───────── 3D body twin — interactive, heat-map glow ───────── */
 function BodyTwin3D({ med90 }) {
   const mountRef = useRef(null);
   const burdenRef = useRef(med90);
   useEffect(() => { burdenRef.current = med90; }, [med90]);
+
+  // zoom state accessible inside animation loop
+  const zoomRef = useRef(6.4);
+  const [zoom, setZoom] = useState(6.4);
+
+  const changeZoom = (delta) => {
+    const next = Math.min(10, Math.max(3.5, zoomRef.current + delta));
+    zoomRef.current = next;
+    setZoom(next);
+  };
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -158,78 +168,199 @@ function BodyTwin3D({ med90 }) {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
-    camera.position.set(0, 0.3, 6.4);
+    camera.position.set(0, 0.3, zoomRef.current);
+
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setClearColor(0x000000, 0);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     mount.appendChild(renderer.domElement);
 
     const root = new THREE.Group();
     scene.add(root);
 
+    // silver-blue body material — PBR, slight metallic sheen
     const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0xdfe9ec, roughness: 0.42, metalness: 0, transparent: true, opacity: 0.5,
-      transmission: 0.25, clearcoat: 0.7, clearcoatRoughness: 0.4, emissive: 0x9fb6bd, emissiveIntensity: 0.18,
+      color: 0xc8d8e0, roughness: 0.38, metalness: 0.12,
+      transparent: true, opacity: 0.82,
+      clearcoat: 0.9, clearcoatRoughness: 0.25,
+      emissive: 0x6fa8bc, emissiveIntensity: 0.06,
     });
-    function addMesh(geo, pos, scale = [1, 1, 1], rot = [0, 0, 0]) {
+
+    function mesh(geo, pos, sx = 1, sy = 1, sz = 1, rx = 0, ry = 0, rz = 0) {
       const m = new THREE.Mesh(geo, bodyMat);
-      m.position.set(...pos); m.scale.set(...scale); m.rotation.set(...rot); root.add(m); return m;
+      m.position.set(...pos); m.scale.set(sx, sy, sz); m.rotation.set(rx, ry, rz);
+      m.castShadow = true; root.add(m); return m;
     }
-    addMesh(new THREE.SphereGeometry(0.34, 36, 24), [0, 2.45, 0], [0.9, 1.08, 0.9]);
-    addMesh(new THREE.CapsuleGeometry(0.52, 1.25, 20, 36), [0, 1.25, 0], [0.92, 1, 0.48]);
-    addMesh(new THREE.SphereGeometry(0.5, 36, 18), [0, 0.28, 0], [0.92, 0.45, 0.5]);
-    addMesh(new THREE.CapsuleGeometry(0.1, 0.46, 12, 20), [0, 1.93, 0], [1, 1, 0.9]);
-    addMesh(new THREE.CapsuleGeometry(0.12, 1.38, 14, 24), [-0.72, 1.1, 0], [0.9, 1, 0.9], [0, 0, -0.2]);
-    addMesh(new THREE.CapsuleGeometry(0.12, 1.38, 14, 24), [0.72, 1.1, 0], [0.9, 1, 0.9], [0, 0, 0.2]);
-    addMesh(new THREE.SphereGeometry(0.14, 18, 14), [-0.86, 0.33, 0]);
-    addMesh(new THREE.SphereGeometry(0.14, 18, 14), [0.86, 0.33, 0]);
-    addMesh(new THREE.CapsuleGeometry(0.15, 1.55, 16, 28), [-0.24, -0.82, 0], [0.9, 1, 0.85], [0, 0, 0.08]);
-    addMesh(new THREE.CapsuleGeometry(0.15, 1.55, 16, 28), [0.24, -0.82, 0], [0.9, 1, 0.85], [0, 0, -0.08]);
-    addMesh(new THREE.BoxGeometry(0.38, 0.12, 0.58), [-0.28, -1.72, 0.08]);
-    addMesh(new THREE.BoxGeometry(0.38, 0.12, 0.58), [0.28, -1.72, 0.08]);
 
-    // the tumor — its size & color reflect the predicted day-90 burden
-    const tumorMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.92 });
-    const tumor = new THREE.Mesh(new THREE.SphereGeometry(0.2, 28, 24), tumorMat);
-    tumor.position.set(0.16, 1.06, 0.4); root.add(tumor);
-    const haloMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.22 });
-    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.34, 28, 24), haloMat);
-    halo.position.copy(tumor.position); root.add(halo);
+    // head
+    mesh(new THREE.SphereGeometry(0.32, 40, 28), [0, 2.54, 0], 0.96, 1.04, 0.94);
+    // neck
+    mesh(new THREE.CapsuleGeometry(0.10, 0.28, 12, 20), [0, 2.12, 0], 1, 1, 0.88);
+    // upper chest — wide
+    mesh(new THREE.CapsuleGeometry(0.50, 0.70, 20, 36), [0, 1.60, 0], 1.06, 1, 0.52);
+    // shoulder caps
+    mesh(new THREE.SphereGeometry(0.20, 24, 18), [-0.72, 1.72, 0]);
+    mesh(new THREE.SphereGeometry(0.20, 24, 18), [0.72, 1.72, 0]);
+    // lower torso / abdomen
+    mesh(new THREE.CapsuleGeometry(0.44, 0.50, 18, 32), [0, 0.92, 0], 1.02, 1, 0.56);
+    // pelvis
+    mesh(new THREE.SphereGeometry(0.44, 32, 22), [0, 0.30, 0], 1.06, 0.50, 0.70);
+    // upper arms
+    mesh(new THREE.CapsuleGeometry(0.11, 0.78, 14, 22), [-0.82, 1.28, 0], 1, 1, 0.96, 0, 0, -0.22);
+    mesh(new THREE.CapsuleGeometry(0.11, 0.78, 14, 22), [0.82, 1.28, 0], 1, 1, 0.96, 0, 0, 0.22);
+    // elbow bumps
+    mesh(new THREE.SphereGeometry(0.12, 18, 14), [-0.96, 0.72, 0]);
+    mesh(new THREE.SphereGeometry(0.12, 18, 14), [0.96, 0.72, 0]);
+    // lower arms
+    mesh(new THREE.CapsuleGeometry(0.09, 0.68, 12, 20), [-1.04, 0.18, 0], 1, 1, 0.92, 0, 0, 0.12);
+    mesh(new THREE.CapsuleGeometry(0.09, 0.68, 12, 20), [1.04, 0.18, 0], 1, 1, 0.92, 0, 0, -0.12);
+    // hands
+    mesh(new THREE.SphereGeometry(0.10, 16, 12), [-1.06, -0.22, 0], 1.1, 0.8, 0.6);
+    mesh(new THREE.SphereGeometry(0.10, 16, 12), [1.06, -0.22, 0], 1.1, 0.8, 0.6);
+    // upper legs
+    mesh(new THREE.CapsuleGeometry(0.165, 1.10, 16, 28), [-0.26, -0.86, 0], 0.95, 1, 0.90, 0, 0, 0.06);
+    mesh(new THREE.CapsuleGeometry(0.165, 1.10, 16, 28), [0.26, -0.86, 0], 0.95, 1, 0.90, 0, 0, -0.06);
+    // knee bumps
+    mesh(new THREE.SphereGeometry(0.16, 20, 16), [-0.28, -1.56, 0], 0.9, 0.8, 0.75);
+    mesh(new THREE.SphereGeometry(0.16, 20, 16), [0.28, -1.56, 0], 0.9, 0.8, 0.75);
+    // lower legs
+    mesh(new THREE.CapsuleGeometry(0.12, 1.02, 14, 24), [-0.26, -2.24, 0], 0.92, 1, 0.82);
+    mesh(new THREE.CapsuleGeometry(0.12, 1.02, 14, 24), [0.26, -2.24, 0], 0.92, 1, 0.82);
+    // feet
+    mesh(new THREE.BoxGeometry(0.30, 0.11, 0.54), [-0.28, -2.84, 0.08]);
+    mesh(new THREE.BoxGeometry(0.30, 0.11, 0.54), [0.28, -2.84, 0.08]);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-    const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(2.5, 3.5, 4); scene.add(key);
-    const warm = new THREE.PointLight(0xffb27a, 2.4, 12); warm.position.set(-3, 1, 3); scene.add(warm);
+    // tumor site — heat-map layers (no floating blob, glows from inside body surface)
+    const tumorPos = new THREE.Vector3(0.14, 1.12, 0.32);
+    const glowMats = [
+      new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.0, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.0, depthWrite: false }),
+    ];
+    const glowOuter = new THREE.Mesh(new THREE.SphereGeometry(0.52, 32, 24), glowMats[0]);
+    glowOuter.position.copy(tumorPos); root.add(glowOuter);
+    const glowCore = new THREE.Mesh(new THREE.SphereGeometry(0.26, 28, 20), glowMats[1]);
+    glowCore.position.copy(tumorPos); root.add(glowCore);
+
+    // warm point light at tumor site to illuminate body surface
+    const tumorLight = new THREE.PointLight(0xf97316, 0, 3.5);
+    tumorLight.position.copy(tumorPos); root.add(tumorLight);
+
+    // scene lighting
+    scene.add(new THREE.AmbientLight(0xe8f0f4, 0.85));
+    const key = new THREE.DirectionalLight(0xffffff, 2.6);
+    key.position.set(2.2, 4, 4); key.castShadow = true; scene.add(key);
+    const fill = new THREE.DirectionalLight(0xbbd4e0, 1.0);
+    fill.position.set(-3, 1, 2); scene.add(fill);
+    const rim = new THREE.DirectionalLight(0x7aafc0, 0.7);
+    rim.position.set(0, -2, -3); scene.add(rim);
+
+    // drag-to-rotate state
+    let isDragging = false, lastX = 0, lastY = 0;
+    let rotY = 0, rotX = 0, velY = 0, velX = 0;
+    let autoRotate = true, idleTimer = null;
+
+    const resumeAutoRotate = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => { autoRotate = true; }, 2200);
+    };
+
+    const onPointerDown = (e) => {
+      isDragging = true; autoRotate = false;
+      lastX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+      lastY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+      velY = 0; velX = 0;
+      e.preventDefault();
+    };
+    const onPointerMove = (e) => {
+      if (!isDragging) return;
+      const cx = e.clientX ?? e.touches?.[0]?.clientX ?? lastX;
+      const cy = e.clientY ?? e.touches?.[0]?.clientY ?? lastY;
+      velY = (cx - lastX) * 0.012; velX = (cy - lastY) * 0.010;
+      rotY += velY; rotX = Math.max(-0.65, Math.min(0.65, rotX + velX));
+      lastX = cx; lastY = cy;
+    };
+    const onPointerUp = () => { isDragging = false; resumeAutoRotate(); };
+    const onWheel = (e) => {
+      e.preventDefault();
+      autoRotate = false;
+      zoomRef.current = Math.min(10, Math.max(3.5, zoomRef.current + e.deltaY * 0.008));
+      setZoom(zoomRef.current);
+      resumeAutoRotate();
+    };
+
+    const canvas = renderer.domElement;
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointerleave", onPointerUp);
+    canvas.addEventListener("touchstart", onPointerDown, { passive: false });
+    canvas.addEventListener("touchmove", onPointerMove, { passive: false });
+    canvas.addEventListener("touchend", onPointerUp);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
 
     const clock = new THREE.Clock();
     let frameId = 0;
     function resize() {
-      const w = mount.clientWidth || 360, h = mount.clientHeight || 480;
+      const w = mount.clientWidth || 340, h = mount.clientHeight || 480;
       renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
     }
+
     function render() {
       const t = clock.getElapsedTime();
-      root.rotation.y = Math.sin(t * 0.3) * 0.5;
-      root.position.y = Math.sin(t * 0.9) * 0.04;
 
-      const b = burdenRef.current; // predicted day-90 burden, % of baseline
+      // smooth zoom
+      const tz = zoomRef.current;
+      camera.position.z += (tz - camera.position.z) * 0.08;
+      camera.updateProjectionMatrix();
+
+      // rotation
+      if (autoRotate) {
+        rotY += 0.005;
+        rotX += (0 - rotX) * 0.03;
+      } else if (!isDragging) {
+        velY *= 0.88; velX *= 0.88;
+        rotY += velY; rotX += velX;
+        rotX = Math.max(-0.65, Math.min(0.65, rotX));
+      }
+      root.rotation.y = rotY;
+      root.rotation.x = rotX;
+      root.position.y = Math.sin(t * 0.8) * 0.03;
+
+      // heat-map glow intensity driven by tumor burden
+      const b = burdenRef.current;
       const respond = b <= RESPONSE;
-      const col = respond ? 0x22c55e : b <= 110 ? 0xf59e0b : 0xef4444;
-      tumorMat.color.setHex(col); haloMat.color.setHex(col);
-      const target = Math.max(0.18, Math.min(1.5, b / 100));
-      const pulse = 1 + Math.sin(t * 3) * 0.06;
-      tumor.scale.setScalar(target * pulse);
-      halo.scale.setScalar(target * (1.5 + Math.sin(t * 3) * 0.18));
-      halo.material.opacity = respond ? 0.12 : 0.24;
+      const intensity = respond ? Math.max(0.05, (b / 70) * 0.35) : Math.min(1.0, (b / 100) * 0.8);
+      const pulse = 0.5 + 0.5 * Math.sin(t * 2.5);
+      const outerOpacity = intensity * (0.18 + pulse * 0.08);
+      const coreOpacity = intensity * (0.38 + pulse * 0.12);
+      const lightInt = intensity * (1.8 + pulse * 0.5);
+
+      glowMats[0].color.setHex(respond ? 0xf59e0b : 0xef4444);
+      glowMats[1].color.setHex(respond ? 0xfcd34d : 0xf97316);
+      glowMats[0].opacity = outerOpacity;
+      glowMats[1].opacity = coreOpacity;
+      tumorLight.color.setHex(respond ? 0xf59e0b : 0xef4444);
+      tumorLight.intensity = lightInt;
 
       renderer.render(scene, camera);
       frameId = requestAnimationFrame(render);
     }
     resize(); render();
-    window.addEventListener("resize", resize);
+    const ro = new ResizeObserver(resize);
+    ro.observe(mount);
     return () => {
-      cancelAnimationFrame(frameId);
-      window.removeEventListener("resize", resize);
+      cancelAnimationFrame(frameId); clearTimeout(idleTimer); ro.disconnect();
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointerleave", onPointerUp);
+      canvas.removeEventListener("touchstart", onPointerDown);
+      canvas.removeEventListener("touchmove", onPointerMove);
+      canvas.removeEventListener("touchend", onPointerUp);
+      canvas.removeEventListener("wheel", onWheel);
       renderer.dispose();
       scene.traverse((o) => {
         if (o.geometry) o.geometry.dispose();
@@ -239,10 +370,32 @@ function BodyTwin3D({ med90 }) {
     };
   }, []);
 
+  const b = med90;
+  const respond = b <= RESPONSE;
+
   return (
-    <div className="relative h-full w-full">
-      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[70%] w-[70%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(242,106,58,0.18),transparent_70%)] blur-2xl" />
-      <div ref={mountRef} className="absolute inset-0" />
+    <div className="relative flex h-full w-full flex-col">
+      {/* ambient background glow */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[20px]">
+        <div className="absolute left-1/2 top-1/2 h-[55%] w-[55%] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl"
+          style={{ background: respond ? "radial-gradient(circle,rgba(245,158,11,0.13),transparent 70%)" : "radial-gradient(circle,rgba(239,68,68,0.17),transparent 70%)" }} />
+      </div>
+
+      {/* canvas */}
+      <div ref={mountRef} className="absolute inset-0 cursor-grab active:cursor-grabbing" style={{ touchAction: "none" }} />
+
+      {/* zoom controls */}
+      <div className="pointer-events-auto absolute bottom-16 right-3 z-20 flex flex-col gap-1">
+        <button onClick={() => changeZoom(-0.8)}
+          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/80 text-sm font-bold text-stone-600 shadow backdrop-blur-sm transition hover:bg-white hover:shadow-md">+</button>
+        <button onClick={() => changeZoom(0.8)}
+          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/80 text-sm font-bold text-stone-600 shadow backdrop-blur-sm transition hover:bg-white hover:shadow-md">−</button>
+      </div>
+
+      {/* drag hint */}
+      <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2">
+        <span className="rounded-full bg-white/60 px-2.5 py-1 text-[10px] text-stone-400 backdrop-blur-sm">drag to rotate · scroll to zoom</span>
+      </div>
     </div>
   );
 }
