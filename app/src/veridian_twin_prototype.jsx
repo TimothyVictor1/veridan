@@ -154,11 +154,11 @@ function BodyTwin3D({ med90 }) {
   useEffect(() => { burdenRef.current = med90; }, [med90]);
 
   // zoom state accessible inside animation loop
-  const zoomRef = useRef(7.2);
-  const [zoom, setZoom] = useState(7.2);
+  const zoomRef = useRef(8.2);
+  const [zoom, setZoom] = useState(8.2);
 
   const changeZoom = (delta) => {
-    const next = Math.min(11, Math.max(4, zoomRef.current + delta));
+    const next = Math.min(13, Math.max(5, zoomRef.current + delta));
     zoomRef.current = next;
     setZoom(next);
   };
@@ -216,15 +216,21 @@ function BodyTwin3D({ med90 }) {
           }
         });
 
-        // center the model and scale it to a consistent on-screen height
-        const box = new THREE.Box3().setFromObject(model);
-        const size = new THREE.Vector3(); box.getSize(size);
-        const center = new THREE.Vector3(); box.getCenter(center);
-        const targetH = 4.4;
+        // scale to a consistent on-screen height
+        const box0 = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3(); box0.getSize(size);
+        const targetH = 3.0;
         const s = targetH / size.y;
         model.scale.setScalar(s);
-        model.position.set(-center.x * s, -center.y * s, -center.z * s);
-        root.add(model);
+
+        // center the (scaled) model at the origin, then face it toward the camera
+        const box = new THREE.Box3().setFromObject(model);
+        const center = new THREE.Vector3(); box.getCenter(center);
+        model.position.sub(center);            // geometry centered at pivot origin
+        const pivot = new THREE.Group();
+        pivot.add(model);
+        pivot.rotation.y = Math.PI;            // model's front is -Z → face camera
+        root.add(pivot);
 
         // place the glow at the chest, relative to the framed body
         const chest = new THREE.Vector3(size.x * s * 0.08, size.y * s * 0.18, size.z * s * 0.55);
@@ -282,7 +288,7 @@ function BodyTwin3D({ med90 }) {
     const onWheel = (e) => {
       e.preventDefault();
       autoRotate = false;
-      zoomRef.current = Math.min(11, Math.max(4, zoomRef.current + e.deltaY * 0.008));
+      zoomRef.current = Math.min(13, Math.max(5, zoomRef.current + e.deltaY * 0.008));
       setZoom(zoomRef.current);
       resumeAutoRotate();
     };
