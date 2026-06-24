@@ -1,16 +1,38 @@
-# React + Vite
+﻿# Veridian Digital Twin Prototype
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Veridian is a speculative React prototype for explaining a future-facing idea: nanobot-style telemetry scans a body, forms a digital twin, detects a fictional disease pattern, and lets a user fake-test chemical combinations on the twin.
 
-Currently, two official plugins are available:
+This is not a real medical product. All patient states, disease names, chemicals, and outcomes are simulated for storytelling only.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Prototype Flow
 
-## React Compiler
+1. On page load, the 3D human body twin enters a scanning state.
+2. After the scan animation, the app reveals the fictional disease: Aster-17 Cellular Drift.
+3. Search for fake chemicals and add them to the selected combination shelf.
+4. Drag the selected combination onto the 3D body, or use the test button.
+5. The body runs a testing animation and returns pass or fail.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Demo Pass Combination
 
-## Expanding the Oxlint configuration
+Only this exact combination passes:
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+```text
+NanoClear X + Immunorin B + Stabilin-7
+```
+
+Every other combination fails, including partial matches or combinations with extra chemicals.
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173/`.
+
+## Scripts
+
+- `npm run dev` starts the Vite development server.
+- `npm run build` creates the production build.
+- `npm run lint` runs Oxlint.

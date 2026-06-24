@@ -1,388 +1,504 @@
-import React, { useState, useMemo } from "react";
-import {
-  ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer, Legend,
-} from "recharts";
-import { Activity, FlaskConical, Sparkles, RefreshCw, User, Check, X, TrendingDown } from "lucide-react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import * as THREE from "three";
+import { Activity, Check, FlaskConical, Plus, RefreshCw, Search, Sparkles, X } from "lucide-react";
 
-/* ----------------------------------------------------------------------------
-   VERIDIAN — Digital Twin Prediction Engine (prototype)
-   The model is real, not a mockup:
-     - Tumor burden follows Gompertz growth:  dV = r * V * ln(K/V) dt
-     - Each drug clears with one-compartment PK:  C <- C * exp(-ke dt), + dose at each cycle
-     - Drug kill is log-kill, scaled by the patient's hidden sensitivity:  dV -= sens * C * V dt
-   Each virtual patient has different hidden biology, so the same drug helps some
-   and fails others. The twin does NOT know the true biology: it runs a Monte-Carlo
-   ensemble over parameter uncertainty to produce a predicted band. "Refine" reweights
-   that ensemble against the first two weeks of observed response (a likelihood update).
----------------------------------------------------------------------------- */
+const SCAN_MS = 3600;
+const TEST_MS = 2700;
+const PASSING_COMBO = ["nanoclear-x", "immunorin-b", "stabilin-7"];
 
-const DT = 0.5;          // days per integration step
-const T = 120;           // horizon (days)
-const V0 = 100;          // baseline tumor burden = 100%
-const KE = { A: 0.15, B: 0.12 };
-const RESPONSE = 70;     // <=70% of baseline at day 90 == >=30% reduction == "response"
+const DISEASE = {
+  name: "Aster-17 Cellular Drift",
+  site: "thoracic lymphatic cluster",
+  severity: "moderate simulated risk",
+  confidence: 94,
+};
 
-// ---- seeded RNG (mulberry32) + gaussian -----------------------------------
-function mulberry32(a) {
-  return function () {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function gauss(rng) {
-  let u = 0, v = 0;
-  while (u === 0) u = rng();
-  while (v === 0) v = rng();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-}
-
-// ---- regimens (standard of care = Drug A standard) ------------------------
-const REGIMENS = [
-  { id: "ctrl", label: "No treatment", drugs: [] },
-  { id: "a_std", label: "Drug A — standard", drugs: [{ which: "A", dose: 1.0, interval: 21 }] },
-  { id: "a_int", label: "Drug A — intensive", drugs: [{ which: "A", dose: 1.4, interval: 14 }] },
-  { id: "b_std", label: "Drug B — standard", drugs: [{ which: "B", dose: 1.0, interval: 21 }] },
-  { id: "combo", label: "Combination A + B", drugs: [{ which: "A", dose: 0.8, interval: 21 }, { which: "B", dose: 0.8, interval: 21 }] },
-];
-const STANDARD_OF_CARE = "a_std";
-
-// ---- preset patients (hidden true biology) --------------------------------
-const PRESETS = [
-  { id: "P01", seed: 11, profile: "62F · newly diagnosed", truth: { r: 0.045, K: 185, sens: { A: 0.16, B: 0.05 } } },
-  { id: "P02", seed: 23, profile: "57M · prior line failed", truth: { r: 0.030, K: 175, sens: { A: 0.04, B: 0.17 } } },
-  { id: "P03", seed: 37, profile: "49F · aggressive disease", truth: { r: 0.055, K: 190, sens: { A: 0.07, B: 0.07 } } },
-  { id: "P04", seed: 52, profile: "71M · indolent disease", truth: { r: 0.020, K: 160, sens: { A: 0.13, B: 0.12 } } },
+const CHEMICALS = [
+  { id: "nanoclear-x", name: "NanoClear X", code: "NCX-41", className: "nanobot solvent", color: "cyan", note: "clears synthetic signal residue" },
+  { id: "immunorin-b", name: "Immunorin B", code: "IMB-22", className: "immune modulator", color: "emerald", note: "boosts virtual immune response" },
+  { id: "stabilin-7", name: "Stabilin-7", code: "STB-07", className: "metabolic stabilizer", color: "amber", note: "reduces organ stress in the twin" },
+  { id: "hepagard", name: "HepaGard", code: "HPG-18", className: "liver shield", color: "lime", note: "protective but not curative" },
+  { id: "myocline", name: "MyoCline", code: "MYC-03", className: "muscle pathway agent", color: "blue", note: "low anomaly effect" },
+  { id: "neuroflux", name: "NeuroFlux", code: "NFX-12", className: "neural signal tuner", color: "violet", note: "wrong target system" },
+  { id: "oxypherin", name: "OxyPherin", code: "OXP-90", className: "oxygen carrier", color: "sky", note: "raises signal noise" },
+  { id: "cardiostat", name: "CardioStat", code: "CDS-11", className: "cardiac stabilizer", color: "rose", note: "stabilizes rhythm only" },
+  { id: "inflamase", name: "Inflamase", code: "IFM-28", className: "inflammation blocker", color: "orange", note: "partial suppression" },
+  { id: "lymphorin", name: "Lymphorin", code: "LYM-04", className: "lymphatic tracer", color: "teal", note: "diagnostic signal only" },
 ];
 
-function randomPatient() {
-  const s = Math.floor(Math.random() * 1e6);
-  const rng = mulberry32(s);
-  return {
-    id: "P" + (Math.floor(rng() * 89) + 10),
-    seed: s,
-    profile: "virtual patient",
-    truth: {
-      r: 0.02 + rng() * 0.04,
-      K: 160 + rng() * 30,
-      sens: { A: 0.03 + rng() * 0.15, B: 0.03 + rng() * 0.15 },
-    },
+function sortIds(ids) {
+  return [...ids].sort().join("|");
+}
+
+function isPassingCombo(selected) {
+  return sortIds(selected.map((item) => item.id)) === sortIds(PASSING_COMBO);
+}
+
+function colorClasses(color) {
+  const map = {
+    amber: "border-amber-200 bg-amber-50 text-amber-800",
+    blue: "border-blue-200 bg-blue-50 text-blue-800",
+    cyan: "border-cyan-200 bg-cyan-50 text-cyan-800",
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    lime: "border-lime-200 bg-lime-50 text-lime-800",
+    orange: "border-orange-200 bg-orange-50 text-orange-800",
+    rose: "border-rose-200 bg-rose-50 text-rose-800",
+    sky: "border-sky-200 bg-sky-50 text-sky-800",
+    teal: "border-teal-200 bg-teal-50 text-teal-800",
+    violet: "border-violet-200 bg-violet-50 text-violet-800",
   };
+  return map[color] || "border-slate-200 bg-slate-50 text-slate-800";
 }
 
-// ---- core simulator: deterministic trajectory for given params + regimen ---
-function simulate(p, regimen) {
-  let V = V0;
-  const C = { A: 0, B: 0 };
-  const next = {}; regimen.drugs.forEach((d) => (next[d.which] = 0));
-  const series = [];
-  const steps = Math.round(T / DT);
-  for (let i = 0; i <= steps; i++) {
-    const day = i * DT;
-    regimen.drugs.forEach((d) => {
-      if (day < T && day + 1e-9 >= next[d.which]) { C[d.which] += d.dose; next[d.which] += d.interval; }
+function BodyTwin3D({ phase, isDragOver, onDrop, onDragOver, onDragLeave }) {
+  const mountRef = useRef(null);
+  const phaseRef = useRef(phase);
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return undefined;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100);
+    camera.position.set(0, 0.25, 6.2);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setClearColor(0x000000, 0);
+    mount.appendChild(renderer.domElement);
+
+    const body = new THREE.Group();
+    scene.add(body);
+
+    const bodyMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0x5eead4,
+      emissive: 0x0e7490,
+      emissiveIntensity: 0.45,
+      transparent: true,
+      opacity: 0.42,
+      roughness: 0.28,
+      metalness: 0.08,
+      transmission: 0.12,
     });
-    if (Number.isInteger(day)) series.push(V);
-    const grow = p.r * V * Math.log(p.K / Math.max(V, 0.5));
-    let kill = 0;
-    regimen.drugs.forEach((d) => (kill += p.sens[d.which] * C[d.which] * V));
-    V = V + (grow - kill) * DT;
-    V = Math.min(Math.max(V, 0.5), p.K * 1.25);
-    C.A *= Math.exp(-KE.A * DT); C.B *= Math.exp(-KE.B * DT);
-  }
-  return series; // length 121, index == day
-}
+    const coreMaterial = new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.9 });
+    const anomalyMaterial = new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.82 });
+    const boneMaterial = new THREE.MeshBasicMaterial({ color: 0xecfeff, transparent: true, opacity: 0.2 });
 
-// twin's noisy parameter sample (centered near truth, slight prior bias + spread)
-function sampleParams(truth, rng) {
-  return {
-    r: truth.r * 1.03 * Math.exp(gauss(rng) * 0.14),
-    K: truth.K * Math.exp(gauss(rng) * 0.07),
-    sens: { A: truth.sens.A * Math.exp(gauss(rng) * 0.18), B: truth.sens.B * Math.exp(gauss(rng) * 0.18) },
-  };
-}
-
-function weightedPct(values, weights, q) {
-  const idx = values.map((v, i) => i).sort((a, b) => values[a] - values[b]);
-  const total = weights.reduce((s, w) => s + w, 0);
-  let cum = 0;
-  for (const i of idx) { cum += weights[i]; if (cum / total >= q) return values[i]; }
-  return values[idx[idx.length - 1]];
-}
-
-// build the twin ensemble + optional calibration against early actual obs
-function buildEnsemble(patient, regimen, N, calibrated, actual) {
-  const members = [];
-  for (let m = 0; m < N; m++) {
-    const rng = mulberry32(patient.seed * 1000 + m + REGIMENS.indexOf(regimen) * 91 + (calibrated ? 7 : 0));
-    members.push(simulate(sampleParams(patient.truth, rng), regimen));
-  }
-  let weights = members.map(() => 1);
-  if (calibrated && actual) {
-    const obsDays = [3, 7, 14], sd = 6;
-    weights = members.map((traj) => {
-      let logL = 0;
-      obsDays.forEach((d) => { const diff = traj[d] - actual[d]; logL += -0.5 * (diff * diff) / (sd * sd); });
-      return Math.exp(logL);
-    });
-    const max = Math.max(...weights);
-    weights = weights.map((w) => w / (max || 1));
-  }
-  const lo = [], med = [], hi = [];
-  for (let d = 0; d <= T; d++) {
-    const col = members.map((t) => t[d]);
-    lo.push(weightedPct(col, weights, 0.05));
-    med.push(weightedPct(col, weights, 0.5));
-    hi.push(weightedPct(col, weights, 0.95));
-  }
-  // response probability at day 90
-  const colDay = members.map((t) => t[90]);
-  const totW = weights.reduce((s, w) => s + w, 0);
-  const pResp = weights.reduce((s, w, i) => s + (colDay[i] <= RESPONSE ? w : 0), 0) / totW;
-  return { lo, med, hi, pResp };
-}
-
-// observed "actual" = true dynamics + observation noise
-function actualTrajectory(patient, regimen) {
-  const truth = simulate(patient.truth, regimen);
-  const rng = mulberry32(patient.seed * 7 + REGIMENS.indexOf(regimen) * 13 + 1);
-  return truth.map((v) => Math.min(Math.max(v * Math.exp(gauss(rng) * 0.04), 0.5), 200));
-}
-
-const fmtPct = (v) => (v - V0 >= 0 ? "+" : "−") + Math.abs(Math.round(v - V0)) + "%";
-
-export default function VeridianTwin() {
-  const [patient, setPatient] = useState(PRESETS[1]); // P02 shows the personalization story by default
-  const [regimenId, setRegimenId] = useState("a_std");
-  const [revealed, setRevealed] = useState(false);
-  const [calibrated, setCalibrated] = useState(false);
-
-  const regimen = REGIMENS.find((r) => r.id === regimenId);
-
-  const actual = useMemo(() => actualTrajectory(patient, regimen), [patient, regimen]);
-  const ens = useMemo(
-    () => buildEnsemble(patient, regimen, 160, calibrated, actual),
-    [patient, regimen, calibrated, actual]
-  );
-  const control = useMemo(() => simulate(patient.truth, REGIMENS[0]), [patient]);
-
-  // compare every regimen for THIS patient (twin predictions)
-  const compare = useMemo(() => {
-    return REGIMENS.filter((r) => r.id !== "ctrl").map((r) => {
-      const act = actualTrajectory(patient, r);
-      const e = buildEnsemble(patient, r, 90, false, act);
-      return { id: r.id, label: r.label, pResp: e.pResp, med90: e.med[90] };
-    }).sort((a, b) => b.pResp - a.pResp);
-  }, [patient]);
-  const best = compare[0];
-
-  const chartData = useMemo(() => {
-    const arr = [];
-    for (let d = 0; d <= T; d++) {
-      arr.push({
-        day: d,
-        lo: Math.round(ens.lo[d] * 10) / 10,
-        bandW: Math.round((ens.hi[d] - ens.lo[d]) * 10) / 10,
-        med: Math.round(ens.med[d] * 10) / 10,
-        control: Math.round(control[d] * 10) / 10,
-        actual: revealed ? Math.round(actual[d] * 10) / 10 : null,
-      });
+    function addMesh(geometry, material, position, scale = [1, 1, 1], rotation = [0, 0, 0]) {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(...position);
+      mesh.scale.set(...scale);
+      mesh.rotation.set(...rotation);
+      body.add(mesh);
+      return mesh;
     }
-    return arr;
-  }, [ens, control, actual, revealed]);
 
-  const med90 = ens.med[90], lo90 = ens.lo[90], hi90 = ens.hi[90];
-  const act90 = actual[90];
-  const covered = act90 >= lo90 && act90 <= hi90;
+    addMesh(new THREE.SphereGeometry(0.34, 36, 24), bodyMaterial, [0, 2.45, 0], [0.9, 1.08, 0.9]);
+    addMesh(new THREE.CapsuleGeometry(0.52, 1.25, 20, 36), bodyMaterial, [0, 1.25, 0], [0.92, 1, 0.48]);
+    addMesh(new THREE.SphereGeometry(0.5, 36, 18), bodyMaterial, [0, 0.28, 0], [0.92, 0.45, 0.5]);
+    addMesh(new THREE.CapsuleGeometry(0.1, 0.46, 12, 20), bodyMaterial, [0, 1.93, 0], [1, 1, 0.9]);
+    addMesh(new THREE.CapsuleGeometry(0.12, 1.38, 14, 24), bodyMaterial, [-0.72, 1.1, 0], [0.9, 1, 0.9], [0, 0, -0.2]);
+    addMesh(new THREE.CapsuleGeometry(0.12, 1.38, 14, 24), bodyMaterial, [0.72, 1.1, 0], [0.9, 1, 0.9], [0, 0, 0.2]);
+    addMesh(new THREE.SphereGeometry(0.14, 18, 14), bodyMaterial, [-0.86, 0.33, 0], [0.9, 0.9, 0.9]);
+    addMesh(new THREE.SphereGeometry(0.14, 18, 14), bodyMaterial, [0.86, 0.33, 0], [0.9, 0.9, 0.9]);
+    addMesh(new THREE.CapsuleGeometry(0.15, 1.55, 16, 28), bodyMaterial, [-0.24, -0.82, 0], [0.9, 1, 0.85], [0, 0, 0.08]);
+    addMesh(new THREE.CapsuleGeometry(0.15, 1.55, 16, 28), bodyMaterial, [0.24, -0.82, 0], [0.9, 1, 0.85], [0, 0, -0.08]);
+    addMesh(new THREE.BoxGeometry(0.38, 0.12, 0.58), bodyMaterial, [-0.28, -1.72, 0.08], [1, 1, 1], [0, 0.08, 0]);
+    addMesh(new THREE.BoxGeometry(0.38, 0.12, 0.58), bodyMaterial, [0.28, -1.72, 0.08], [1, 1, 1], [0, -0.08, 0]);
 
-  const resetPatient = (p) => { setPatient(p); setRevealed(false); setCalibrated(false); setRegimenId("a_std"); };
+    addMesh(new THREE.CapsuleGeometry(0.028, 2.28, 8, 12), boneMaterial, [0, 0.94, 0.06]);
+    addMesh(new THREE.TorusGeometry(0.44, 0.014, 8, 80), coreMaterial, [0, 1.42, 0.02], [1, 0.35, 0.18], [Math.PI / 2, 0, 0]);
+    addMesh(new THREE.TorusGeometry(0.34, 0.012, 8, 80), coreMaterial, [0, 0.84, 0.02], [1, 0.28, 0.18], [Math.PI / 2, 0, 0]);
+
+    const anomaly = addMesh(new THREE.SphereGeometry(0.18, 32, 20), anomalyMaterial, [0.24, 1.08, 0.2]);
+    const anomalyHalo = addMesh(new THREE.SphereGeometry(0.32, 32, 20), anomalyMaterial, [0.24, 1.08, 0.2]);
+    anomalyHalo.material = anomalyMaterial.clone();
+    anomalyHalo.material.opacity = 0.18;
+
+    const rings = [];
+    for (let i = 0; i < 5; i += 1) {
+      const mat = new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.45, side: THREE.DoubleSide });
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(1.06 + i * 0.025, 0.008, 8, 120), mat);
+      ring.rotation.x = Math.PI / 2;
+      body.add(ring);
+      rings.push(ring);
+    }
+
+    const stream = new THREE.Group();
+    scene.add(stream);
+    const streamDots = [];
+    for (let i = 0; i < 34; i += 1) {
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.022 + (i % 3) * 0.004, 10, 10), new THREE.MeshBasicMaterial({ color: i % 2 ? 0x67e8f9 : 0xfacc15, transparent: true, opacity: 0.9 }));
+      stream.add(dot);
+      streamDots.push(dot);
+    }
+
+    const ambient = new THREE.AmbientLight(0x88ffff, 1.2);
+    scene.add(ambient);
+    const key = new THREE.PointLight(0x67e8f9, 5, 9);
+    key.position.set(2.7, 2.8, 3.2);
+    scene.add(key);
+    const rim = new THREE.PointLight(0xfbbf24, 2.2, 7);
+    rim.position.set(-2.2, 0.8, 2.4);
+    scene.add(rim);
+
+    const clock = new THREE.Clock();
+    let frameId = 0;
+
+    function resize() {
+      const width = mount.clientWidth || 640;
+      const height = mount.clientHeight || 640;
+      renderer.setSize(width, height, false);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+    }
+
+    function render() {
+      const elapsed = clock.getElapsedTime();
+      const currentPhase = phaseRef.current;
+      body.rotation.y = elapsed * 0.38;
+      body.rotation.x = Math.sin(elapsed * 0.45) * 0.03;
+
+      const isScanning = currentPhase === "scanning";
+      const isTesting = currentPhase === "testing";
+      const isPassed = currentPhase === "passed";
+      const isFailed = currentPhase === "failed";
+
+      bodyMaterial.emissiveIntensity = isTesting ? 0.95 : isPassed ? 0.78 : isFailed ? 0.38 : 0.48;
+      bodyMaterial.color.set(isFailed ? 0x93a4b7 : isPassed ? 0x6ee7b7 : 0x5eead4);
+      anomalyMaterial.color.set(isPassed ? 0x22c55e : isFailed ? 0xef4444 : 0xf59e0b);
+      anomalyMaterial.opacity = isPassed ? 0.28 : 0.82;
+      anomaly.scale.setScalar(1 + Math.sin(elapsed * (isTesting ? 12 : 4)) * (isTesting ? 0.24 : 0.12));
+      anomalyHalo.scale.setScalar(1.1 + Math.sin(elapsed * 3.2) * 0.25);
+      anomalyHalo.visible = !isPassed;
+
+      rings.forEach((ring, index) => {
+        ring.visible = isScanning || isTesting;
+        ring.position.y = -1.75 + ((elapsed * (isTesting ? 1.3 : 0.8) + index * 0.58) % 4.45);
+        ring.material.opacity = isTesting ? 0.58 : 0.34;
+        ring.scale.setScalar(1 + Math.sin(elapsed * 2 + index) * 0.03);
+      });
+
+      stream.visible = isTesting;
+      streamDots.forEach((dot, index) => {
+        const p = (elapsed * 0.72 + index * 0.037) % 1;
+        dot.position.x = -2.8 + p * 3.05;
+        dot.position.y = 1.85 - p * 0.82 + Math.sin(elapsed * 4 + index) * 0.1;
+        dot.position.z = 0.58 + Math.cos(index * 2.4 + elapsed) * 0.22;
+        dot.material.opacity = 0.25 + p * 0.75;
+      });
+
+      renderer.render(scene, camera);
+      frameId = requestAnimationFrame(render);
+    }
+
+    resize();
+    render();
+    window.addEventListener("resize", resize);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", resize);
+      renderer.dispose();
+      scene.traverse((object) => {
+        if (object.geometry) object.geometry.dispose();
+        if (object.material) {
+          if (Array.isArray(object.material)) object.material.forEach((material) => material.dispose());
+          else object.material.dispose();
+        }
+      });
+      if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
+    };
+  }, []);
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 text-slate-900 font-sans p-4 sm:p-6">
-      <div className="max-w-6xl mx-auto">
-        {/* header */}
-        <header className="flex items-center justify-between gap-3 mb-5">
-          <div className="flex items-center gap-2.5">
-            <div className="h-9 w-9 rounded-xl bg-teal-600 flex items-center justify-center">
-              <Activity className="h-5 w-5 text-white" />
-            </div>
-            <div>
-              <div className="text-lg font-bold tracking-tight text-slate-900 leading-none">Veridian</div>
-              <div className="text-xs text-slate-500 leading-none mt-1">Digital Twin · Prediction Engine</div>
+    <div
+      data-testid="body-drop-target"
+      className={(isDragOver ? "border-cyan-200 bg-cyan-300/10" : "border-white/10 bg-black/20") + " relative min-h-[640px] overflow-hidden rounded-lg border transition"}
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+    >
+      <div className="stage-grid absolute inset-0 opacity-60" />
+      <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-3 p-4">
+        <div className="rounded-md border border-cyan-200/25 bg-slate-950/70 px-3 py-2 text-white backdrop-blur">
+          <div className="text-xs text-cyan-200">3D body twin</div>
+          <div className="font-mono text-sm">{phase === "scanning" ? "scanning" : phase === "testing" ? "compound trial" : "ready"}</div>
+        </div>
+        <div className="rounded-md border border-white/10 bg-slate-950/70 px-3 py-2 text-right text-white backdrop-blur">
+          <div className="text-xs text-slate-400">drop target</div>
+          <div className="font-mono text-sm">thoracic anomaly</div>
+        </div>
+      </div>
+      {phase === "scanning" && <div className="scan-sweep absolute inset-x-8 top-10 z-20 h-1 rounded-full bg-cyan-200 shadow-[0_0_28px_rgba(103,232,249,0.95)]" />}
+      {isDragOver && <div className="absolute inset-4 z-20 rounded-lg border border-cyan-200 bg-cyan-200/10 shadow-[0_0_40px_rgba(103,232,249,0.35)]" />}
+      <div ref={mountRef} className="absolute inset-0 z-0" />
+    </div>
+  );
+}
+
+function ChemicalSearch({ query, setQuery, selected, addChemical }) {
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return CHEMICALS.slice(0, 6);
+    return CHEMICALS.filter((chemical) => [chemical.name, chemical.code, chemical.className, chemical.note].join(" ").toLowerCase().includes(q));
+  }, [query]);
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2">
+        <Search className="h-4 w-4 text-cyan-700" />
+        <h2 className="text-sm font-semibold text-slate-800">Chemical search</h2>
+      </div>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search NanoClear, immune, stabilizer..."
+          className="h-11 w-full rounded-md border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-2 focus:ring-cyan-100"
+        />
+      </div>
+      <div className="mt-3 grid gap-2">
+        {filtered.map((chemical) => {
+          const alreadySelected = selected.some((item) => item.id === chemical.id);
+          return (
+            <button
+              key={chemical.id}
+              type="button"
+              onClick={() => addChemical(chemical)}
+              disabled={alreadySelected}
+              className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left transition hover:border-cyan-200 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold text-slate-900">{chemical.name}</span>
+                <span className="mt-0.5 block truncate text-xs text-slate-500">{chemical.code} / {chemical.className}</span>
+              </span>
+              <span className={(alreadySelected ? "border-slate-200 bg-slate-100 text-slate-400" : colorClasses(chemical.color)) + " grid h-8 w-8 place-items-center rounded-md border"}>
+                {alreadySelected ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ComboShelf({ selected, removeChemical, clearCombo, startDrag, canTest, onQuickTest }) {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <FlaskConical className="h-4 w-4 text-cyan-700" />
+          <h2 className="text-sm font-semibold text-slate-800">Selected combination</h2>
+        </div>
+        <button type="button" onClick={clearCombo} className="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Clear selected chemicals"><RefreshCw className="h-4 w-4" /></button>
+      </div>
+
+      <div
+        data-testid="combo-shelf"
+        draggable={selected.length > 0}
+        onDragStart={startDrag}
+        className={(selected.length > 0 ? "cursor-grab border-cyan-200 bg-cyan-50" : "border-dashed border-slate-200 bg-slate-50") + " min-h-32 rounded-md border p-3 transition active:cursor-grabbing"}
+      >
+        {selected.length === 0 ? (
+          <div className="grid h-24 place-items-center text-center text-sm text-slate-400">No chemicals selected</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {selected.map((chemical) => (
+              <span key={chemical.id} className={(colorClasses(chemical.color)) + " inline-flex max-w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs font-semibold"}>
+                <span className="truncate">{chemical.name}</span>
+                <button type="button" onClick={(event) => { event.stopPropagation(); removeChemical(chemical.id); }} className="rounded-sm p-0.5 hover:bg-white/70" aria-label={`Remove ${chemical.name}`}><X className="h-3.5 w-3.5" /></button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={onQuickTest}
+        disabled={!canTest}
+        className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-slate-950 px-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
+      >
+        <Sparkles className="h-4 w-4" />
+        Test selected combo
+      </button>
+    </section>
+  );
+}
+
+function StatusPanel({ scanComplete, phase, result, selected, resetScan }) {
+  const selectedNames = selected.map((item) => item.name).join(" + ") || "none";
+  return (
+    <aside className="grid gap-4">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex items-center gap-2">
+          <Activity className="h-4 w-4 text-cyan-700" />
+          <h2 className="text-sm font-semibold text-slate-800">Scan status</h2>
+        </div>
+        <div className="space-y-3">
+          <ProgressRow label="Nanobot sweep" value={scanComplete ? 100 : 64} active={!scanComplete} />
+          <ProgressRow label="Twin alignment" value={scanComplete ? 96 : 58} active={!scanComplete} />
+          <ProgressRow label="Anomaly lock" value={scanComplete ? 94 : 31} active={!scanComplete} />
+        </div>
+        <button type="button" onClick={resetScan} className="mt-4 flex h-9 w-full items-center justify-center gap-2 rounded-md border border-slate-200 bg-white text-sm font-semibold text-slate-700 transition hover:bg-slate-50"><RefreshCw className="h-4 w-4" />Restart scan</button>
+      </section>
+
+      <section className={(scanComplete ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white") + " rounded-lg border p-4 shadow-sm"}>
+        <div className="text-xs text-slate-500">Disease found</div>
+        {scanComplete ? (
+          <div className="mt-2">
+            <div className="text-lg font-bold text-slate-950">{DISEASE.name}</div>
+            <div className="mt-1 text-sm text-slate-700">{DISEASE.site}</div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-md bg-white/70 p-2"><span className="block text-slate-500">Severity</span><span className="font-semibold text-amber-800">{DISEASE.severity}</span></div>
+              <div className="rounded-md bg-white/70 p-2"><span className="block text-slate-500">Confidence</span><span className="font-mono font-semibold text-slate-900">{DISEASE.confidence}%</span></div>
             </div>
           </div>
-          <span className="hidden sm:inline-block text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-full px-3 py-1">
-            Simulated model · prototype · not clinically validated
-          </span>
+        ) : (
+          <div className="mt-2 text-sm text-slate-500">Scanning body twin...</div>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-2 text-xs text-slate-500">Current payload</div>
+        <div className="min-h-10 rounded-md bg-slate-50 p-3 text-sm font-semibold text-slate-800">{selectedNames}</div>
+        {phase === "testing" && <div className="mt-3 rounded-md border border-cyan-200 bg-cyan-50 p-3 text-sm font-semibold text-cyan-800">Testing on digital twin...</div>}
+        {result && (
+          <div data-testid="test-result" className={(result.passed ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-800") + " mt-3 rounded-md border p-3"}>
+            <div className="flex items-center gap-2 text-sm font-bold">{result.passed ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}{result.passed ? "Combination passed" : "Combination failed"}</div>
+            <p className="mt-1 text-xs leading-5">{result.message}</p>
+          </div>
+        )}
+      </section>
+    </aside>
+  );
+}
+
+function ProgressRow({ label, value, active }) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs"><span className="text-slate-500">{label}</span><span className="font-mono text-slate-800">{value}%</span></div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={(active ? "scan-progress" : "bg-cyan-500") + " h-full rounded-full"} style={{ width: `${value}%` }} /></div>
+    </div>
+  );
+}
+
+export default function VeridianTwin() {
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState([]);
+  const [phase, setPhase] = useState("scanning");
+  const [scanComplete, setScanComplete] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setScanComplete(true);
+      setPhase("ready");
+    }, SCAN_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  function addChemical(chemical) {
+    setSelected((items) => {
+      if (items.some((item) => item.id === chemical.id) || items.length >= 5) return items;
+      return [...items, chemical];
+    });
+    setResult(null);
+    if (phase === "passed" || phase === "failed") setPhase("ready");
+  }
+
+  function removeChemical(id) {
+    setSelected((items) => items.filter((item) => item.id !== id));
+    setResult(null);
+    if (phase === "passed" || phase === "failed") setPhase("ready");
+  }
+
+  function clearCombo() {
+    setSelected([]);
+    setResult(null);
+    if (scanComplete) setPhase("ready");
+  }
+
+  function resetScan() {
+    setPhase("scanning");
+    setScanComplete(false);
+    setResult(null);
+    window.setTimeout(() => {
+      setScanComplete(true);
+      setPhase("ready");
+    }, SCAN_MS);
+  }
+
+  function runTest() {
+    if (!scanComplete || selected.length === 0 || phase === "testing") return;
+    setIsDragOver(false);
+    setResult(null);
+    setPhase("testing");
+    const payload = [...selected];
+    window.setTimeout(() => {
+      const passed = isPassingCombo(payload);
+      setResult({
+        passed,
+        message: passed
+          ? "Aster-17 signal collapsed inside the simulated twin with acceptable virtual organ stress."
+          : "The anomaly remained active or organ stress exceeded the simulated safety window.",
+      });
+      setPhase(passed ? "passed" : "failed");
+    }, TEST_MS);
+  }
+
+  function startDrag(event) {
+    if (selected.length === 0) return;
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData("application/veridian-combo", selected.map((item) => item.id).join(","));
+  }
+
+  function handleDragOver(event) {
+    if (!scanComplete || selected.length === 0 || phase === "testing") return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragOver(true);
+  }
+
+  function handleDrop(event) {
+    event.preventDefault();
+    if (!event.dataTransfer.getData("application/veridian-combo")) return;
+    runTest();
+  }
+
+  const canTest = scanComplete && selected.length > 0 && phase !== "testing";
+
+  return (
+    <div className="min-h-screen bg-[#f3f7f8] text-slate-900">
+      <div className="mx-auto grid w-full max-w-[1600px] gap-5 p-4 sm:p-6">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-slate-950"><Activity className="h-5 w-5 text-cyan-200" /></div>
+            <div><div className="text-xl font-bold leading-none text-slate-950">Veridian</div><div className="mt-1 text-xs leading-none text-slate-500">interactive digital twin testing prototype</div></div>
+          </div>
+          <span className="rounded-md border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500 shadow-sm">Fictional demo / simulated disease / fake chemicals</span>
         </header>
 
-        <div className="flex flex-col lg:flex-row gap-4">
-          {/* controls */}
-          <aside className="lg:w-80 shrink-0 flex flex-col gap-4">
-            <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <User className="h-4 w-4 text-teal-600" />
-                <h2 className="text-sm font-semibold text-slate-800">Virtual patient</h2>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {PRESETS.map((p) => (
-                  <button key={p.id} onClick={() => resetPatient(p)}
-                    className={"rounded-lg px-2 py-2 text-sm font-medium text-left focus:outline-none focus:ring-2 focus:ring-teal-500 transition " +
-                      (patient.id === p.id ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200")}>
-                    <div className="font-mono">{p.id}</div>
-                    <div className={"text-xs " + (patient.id === p.id ? "text-teal-100" : "text-slate-500")}>{p.profile}</div>
-                  </button>
-                ))}
-              </div>
-              <button onClick={() => resetPatient(randomPatient())}
-                className="mt-2 w-full rounded-lg px-3 py-2 text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500 flex items-center justify-center gap-2">
-                <RefreshCw className="h-3.5 w-3.5" /> New random patient
-              </button>
-              <p className="text-xs text-slate-400 mt-3 leading-relaxed">
-                The twin is not told this patient's drug sensitivity. It infers a prediction with uncertainty.
-              </p>
-            </section>
+        <main className="grid gap-5 xl:grid-cols-[360px_minmax(520px,1fr)_360px]">
+          <div className="grid content-start gap-4">
+            <ChemicalSearch query={query} setQuery={setQuery} selected={selected} addChemical={addChemical} />
+            <ComboShelf selected={selected} removeChemical={removeChemical} clearCombo={clearCombo} startDrag={startDrag} canTest={canTest} onQuickTest={runTest} />
+          </div>
 
-            <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <FlaskConical className="h-4 w-4 text-teal-600" />
-                <h2 className="text-sm font-semibold text-slate-800">Treatment to simulate</h2>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {REGIMENS.filter((r) => r.id !== "ctrl").map((r) => (
-                  <button key={r.id} onClick={() => { setRegimenId(r.id); setRevealed(false); }}
-                    className={"rounded-lg px-3 py-2 text-sm font-medium text-left flex items-center justify-between focus:outline-none focus:ring-2 focus:ring-teal-500 transition " +
-                      (regimenId === r.id ? "bg-teal-50 text-teal-800 ring-1 ring-teal-300" : "bg-slate-50 text-slate-700 hover:bg-slate-100")}>
-                    {r.label}
-                    {r.id === STANDARD_OF_CARE && <span className="text-xs text-slate-400">standard</span>}
-                  </button>
-                ))}
-              </div>
-            </section>
+          <section className="rounded-lg border border-slate-900 bg-[#071014] p-3 shadow-2xl">
+            <BodyTwin3D phase={phase} isDragOver={isDragOver} onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={() => setIsDragOver(false)} />
+          </section>
 
-            <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col gap-2.5">
-              <button onClick={() => setRevealed(true)} disabled={revealed}
-                className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-amber-400 flex items-center justify-center gap-2">
-                <TrendingDown className="h-4 w-4" /> {revealed ? "Outcome revealed" : "Administer & reveal outcome"}
-              </button>
-              <label className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer select-none px-1">
-                <input type="checkbox" checked={calibrated} onChange={(e) => setCalibrated(e.target.checked)}
-                  className="h-4 w-4 accent-teal-600" />
-                Refine twin with first 2 weeks of response
-              </label>
-            </section>
-          </aside>
-
-          {/* stage */}
-          <main className="flex-1 flex flex-col gap-4 min-w-0">
-            <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
-              <div className="flex items-center justify-between mb-1">
-                <h2 className="text-sm font-semibold text-slate-800">Predicted tumor response</h2>
-                <span className="font-mono text-xs text-slate-400">{patient.id} · {regimen.label}</span>
-              </div>
-              <div className="h-72 sm:h-80 w-full -ml-2">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={chartData} margin={{ top: 10, right: 12, bottom: 4, left: -8 }}>
-                    <CartesianGrid stroke="#eef2f6" vertical={false} />
-                    <XAxis dataKey="day" tick={{ fontSize: 11, fill: "#94a3b8" }} tickLine={false} axisLine={{ stroke: "#e2e8f0" }}
-                      ticks={[0, 30, 60, 90, 120]} label={{ value: "days", position: "insideBottomRight", offset: -2, fontSize: 11, fill: "#94a3b8" }} />
-                    <YAxis domain={[0, 195]} tick={{ fontSize: 11, fill: "#94a3b8" }} tickLine={false} axisLine={false}
-                      ticks={[0, 50, 100, 150]} width={42}
-                      label={{ value: "% of baseline", angle: -90, position: "insideLeft", fontSize: 11, fill: "#94a3b8", dy: 40 }} />
-                    <Tooltip
-                      contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0", fontSize: 12, fontFamily: "ui-monospace, monospace" }}
-                      formatter={(v, n) => v == null ? null : [Math.round(v) + "%", n]}
-                      labelFormatter={(l) => "day " + l} />
-                    <ReferenceLine y={100} stroke="#cbd5e1" strokeDasharray="2 2" />
-                    <ReferenceLine y={RESPONSE} stroke="#10b981" strokeDasharray="4 3"
-                      label={{ value: "response threshold", position: "insideTopLeft", fontSize: 10, fill: "#059669" }} />
-                    <Area type="monotone" dataKey="lo" stackId="band" stroke="none" fill="none" isAnimationActive={false} legendType="none" />
-                    <Area type="monotone" dataKey="bandW" stackId="band" stroke="none" fill="#14b8a6" fillOpacity={0.16} isAnimationActive={false} name="90% range" />
-                    <Line type="monotone" dataKey="med" stroke="#0d9488" strokeWidth={2.5} dot={false} isAnimationActive={false} name="Predicted (median)" />
-                    <Line type="monotone" dataKey="control" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="5 4" dot={false} isAnimationActive={false} name="Untreated" />
-                    <Line type="monotone" dataKey="actual" stroke="#f59e0b" strokeWidth={2.75} dot={false} connectNulls={false}
-                      isAnimationActive={true} animationDuration={1100} name="Actual" />
-                    <Legend wrapperStyle={{ fontSize: 11, paddingTop: 6 }} iconType="plainline" />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-
-            {/* readouts */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-                <div className="text-xs text-slate-500 uppercase tracking-wide">Predicted change · day 90</div>
-                <div className="font-mono text-3xl font-semibold text-slate-900 mt-1">{fmtPct(med90)}</div>
-                <div className="font-mono text-xs text-slate-400 mt-1">range {fmtPct(hi90)} to {fmtPct(lo90)}</div>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-                <div className="text-xs text-slate-500 uppercase tracking-wide">Predicted response prob.</div>
-                <div className="font-mono text-3xl font-semibold text-slate-900 mt-1">{Math.round(ens.pResp * 100)}%</div>
-                <div className="h-1.5 w-full bg-slate-100 rounded-full mt-2 overflow-hidden">
-                  <div className="h-full bg-teal-500 rounded-full" style={{ width: Math.round(ens.pResp * 100) + "%" }} />
-                </div>
-              </div>
-
-              {revealed ? (
-                <div className={"rounded-2xl border shadow-sm p-4 " + (covered ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200")}>
-                  <div className="text-xs text-slate-500 uppercase tracking-wide">Actual · day 90</div>
-                  <div className="font-mono text-3xl font-semibold text-slate-900 mt-1">{fmtPct(act90)}</div>
-                  <div className={"text-xs mt-1 flex items-center gap-1 font-medium " + (covered ? "text-emerald-700" : "text-rose-700")}>
-                    {covered ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
-                    {covered ? "within predicted range" : "outside predicted range"}
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-slate-900 rounded-2xl shadow-sm p-4 text-white">
-                  <div className="text-xs text-teal-300 uppercase tracking-wide flex items-center gap-1">
-                    <Sparkles className="h-3.5 w-3.5" /> Twin recommends
-                  </div>
-                  <div className="text-lg font-semibold mt-1 leading-tight">{best.label}</div>
-                  <div className="text-xs text-slate-300 mt-1">highest predicted response for this patient</div>
-                </div>
-              )}
-            </div>
-
-            {/* compare all */}
-            <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
-              <h2 className="text-sm font-semibold text-slate-800 mb-3">Every treatment, ranked for this patient</h2>
-              <div className="flex flex-col gap-2">
-                {compare.map((c) => {
-                  const pct = Math.round(c.pResp * 100);
-                  const isBest = c.id === best.id;
-                  return (
-                    <button key={c.id} onClick={() => { setRegimenId(c.id); setRevealed(false); }}
-                      className="group flex items-center gap-3 text-left focus:outline-none">
-                      <div className="w-36 sm:w-44 shrink-0 text-sm text-slate-700 flex items-center gap-1.5">
-                        {c.label}
-                        {c.id === STANDARD_OF_CARE && <span className="text-[10px] text-slate-400 font-mono">std</span>}
-                      </div>
-                      <div className="flex-1 h-6 bg-slate-100 rounded-lg overflow-hidden">
-                        <div className={"h-full rounded-lg transition-all " + (isBest ? "bg-teal-500" : "bg-slate-300 group-hover:bg-slate-400")}
-                          style={{ width: Math.max(pct, 3) + "%" }} />
-                      </div>
-                      <div className="w-12 text-right font-mono text-sm font-semibold text-slate-800">{pct}%</div>
-                    </button>
-                  );
-                })}
-              </div>
-              {best.id !== STANDARD_OF_CARE && (
-                <p className="text-xs text-teal-700 bg-teal-50 rounded-lg px-3 py-2 mt-3 leading-relaxed">
-                  For this patient the twin's best option ({best.label}) is not the standard of care.
-                  That gap is the case for predicting per patient instead of treating the average.
-                </p>
-              )}
-            </section>
-          </main>
-        </div>
-
-        <p className="text-xs text-slate-400 mt-5 leading-relaxed max-w-3xl">
-          Engine: Gompertz tumor growth with one-compartment pharmacokinetics and log-kill drug effect, parameter
-          uncertainty propagated through a 160-sample Monte-Carlo ensemble. "Refine" reweights the ensemble against the
-          first two weeks of observed response. Numbers are illustrative, generated by the model, and not derived from real patients.
-        </p>
+          <StatusPanel scanComplete={scanComplete} phase={phase} result={result} selected={selected} resetScan={resetScan} />
+        </main>
       </div>
     </div>
   );
