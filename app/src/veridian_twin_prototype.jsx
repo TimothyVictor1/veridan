@@ -216,44 +216,62 @@ function BodyTwin3D({ med90 }) {
           }
         });
 
-        // scale to a consistent on-screen height
-        model.updateMatrixWorld(true);
-        const box0 = new THREE.Box3().setFromObject(model);
-        const size = new THREE.Vector3(); box0.getSize(size);
-        const targetH = 2.8;
-        const s = targetH / size.y;
-        model.scale.setScalar(s);
-
-        // center the (scaled) model at the origin — recompute AFTER scaling so the
-        // world matrix reflects the new scale (otherwise it ends up off-centre)
-        model.updateMatrixWorld(true);
-        const box = new THREE.Box3().setFromObject(model);
-        const center = new THREE.Vector3(); box.getCenter(center);
-        model.position.sub(center);            // geometry centered at pivot origin
+        // mount inside a pivot that faces the camera (model's front is -Z)
         const pivot = new THREE.Group();
         pivot.add(model);
-        pivot.rotation.y = Math.PI;            // model's front is -Z → face camera
+        pivot.rotation.y = Math.PI;
         root.add(pivot);
 
-        // place the glow at the chest, relative to the framed body
-        const chest = new THREE.Vector3(size.x * s * 0.08, size.y * s * 0.18, size.z * s * 0.55);
-        glowOuter.position.copy(chest);
-        glowCore.position.copy(chest);
-        tumorLight.position.copy(chest);
-        root.add(glowOuter, glowCore, tumorLight);
-
-        // play the idle clip for an arms-down, gently-breathing pose — but strip
-        // the root/hip *position* tracks first, since they translate the whole
-        // skinned mesh off the (static) bounding box we centred on. Keeping only
-        // the rotation tracks lets the body sway in place while staying centred.
+        // settle into the idle pose first (strip hip *position* tracks so the
+        // body sways in place rather than translating off-screen)
         if (gltf.animations && gltf.animations.length) {
           const idle = gltf.animations.find((c) => /idle/i.test(c.name)) || gltf.animations[0];
           const clip = idle.clone();
           clip.tracks = clip.tracks.filter((t) => !t.name.endsWith(".position"));
           mixer = new THREE.AnimationMixer(model);
           mixer.clipAction(clip).play();
-          mixer.update(0.4); // settle into the pose immediately
+          mixer.update(0.4);
         }
+
+        // A SkinnedMesh renders through its bones, so Box3.setFromObject (which
+        // reads the *pre-skin* geometry) reports the wrong centre. Measure the
+        // actual skeleton bones instead — that is what's really on screen.
+        const tmp = new THREE.Vector3();
+        const measureBones = () => {
+          const bb = new THREE.Box3();
+          let found = false;
+          model.traverse((o) => { if (o.isBone) { bb.expandByPoint(o.getWorldPosition(tmp)); found = true; } });
+          return found ? bb : null;
+        };
+
+        const targetH = 2.9;
+        pivot.updateWorldMatrix(true, true);
+        let bb = measureBones();
+        if (bb) {
+          const sz = bb.getSize(new THREE.Vector3());
+          const s = targetH / (sz.y || 1);
+          pivot.scale.multiplyScalar(s);
+          pivot.updateWorldMatrix(true, true);
+          bb = measureBones();
+          const c = bb.getCenter(new THREE.Vector3());
+          pivot.position.sub(c);                 // bone-cloud centre → world origin
+          pivot.updateWorldMatrix(true, true);
+        } else {
+          // fallback: static box (non-skinned models)
+          const box = new THREE.Box3().setFromObject(model);
+          const sz = box.getSize(new THREE.Vector3());
+          pivot.scale.multiplyScalar(targetH / (sz.y || 1));
+          pivot.updateWorldMatrix(true, true);
+          const box2 = new THREE.Box3().setFromObject(model);
+          pivot.position.sub(box2.getCenter(new THREE.Vector3()));
+        }
+
+        // glow at the chest: nudge up from centre and toward the camera (+Z front)
+        const chest = new THREE.Vector3(0.04, targetH * 0.16, targetH * 0.14);
+        glowOuter.position.copy(chest);
+        glowCore.position.copy(chest);
+        tumorLight.position.copy(chest);
+        root.add(glowOuter, glowCore, tumorLight);
       },
       undefined,
       (err) => { console.error("twin model failed to load", err); },
