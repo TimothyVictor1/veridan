@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import {
   ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer,
 } from "recharts";
@@ -179,80 +180,69 @@ function BodyTwin3D({ med90 }) {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     mount.appendChild(renderer.domElement);
 
-    const root = new THREE.Group();
+    const root = new THREE.Group();   // rotated by drag/auto-rotate
     scene.add(root);
 
-    // glossy pearl-silver body material — anatomical-render look
+    // glossy pearl-silver medical-avatar material applied to the real human mesh
     const bodyMat = new THREE.MeshPhysicalMaterial({
-      color: 0xdbe4ea, roughness: 0.28, metalness: 0.28,
-      transparent: true, opacity: 0.96,
-      clearcoat: 1.0, clearcoatRoughness: 0.18,
-      sheen: 0.6, sheenColor: new THREE.Color(0xeaf2f7),
-      emissive: 0x5f8ea3, emissiveIntensity: 0.05,
+      color: 0xc9d6de, roughness: 0.32, metalness: 0.2,
+      clearcoat: 1.0, clearcoatRoughness: 0.22,
+      sheen: 0.7, sheenColor: new THREE.Color(0xeaf2f7),
+      emissive: 0x3f5f6e, emissiveIntensity: 0.08,
     });
 
-    function mesh(geo, pos, sx = 1, sy = 1, sz = 1, rx = 0, ry = 0, rz = 0) {
-      const m = new THREE.Mesh(geo, bodyMat);
-      m.position.set(...pos); m.scale.set(sx, sy, sz); m.rotation.set(rx, ry, rz);
-      m.castShadow = true; root.add(m); return m;
-    }
-
-    // ── head & neck ──
-    mesh(new THREE.SphereGeometry(0.30, 44, 32), [0, 2.56, 0], 0.92, 1.06, 0.96);  // cranium
-    mesh(new THREE.SphereGeometry(0.20, 32, 24), [0, 2.42, 0.06], 0.80, 1.0, 0.92); // jaw/face
-    mesh(new THREE.CapsuleGeometry(0.115, 0.20, 14, 24), [0, 2.14, 0], 1, 1, 0.9);  // neck
-    mesh(new THREE.CapsuleGeometry(0.13, 0.16, 12, 22), [0, 2.02, -0.04], 1.5, 1, 1.1, 0.3, 0, 0); // trapezius
-
-    // ── torso: tapered V (broad chest → narrow waist) ──
-    mesh(new THREE.SphereGeometry(0.50, 40, 30), [0, 1.62, 0], 1.12, 0.92, 0.62);   // ribcage / chest mass
-    mesh(new THREE.SphereGeometry(0.24, 28, 22), [-0.21, 1.58, 0.30], 1.0, 0.85, 0.7); // left pec
-    mesh(new THREE.SphereGeometry(0.24, 28, 22), [0.21, 1.58, 0.30], 1.0, 0.85, 0.7);  // right pec
-    mesh(new THREE.CapsuleGeometry(0.40, 0.42, 20, 34), [0, 1.06, 0], 1.04, 1, 0.60);  // upper abdomen
-    // ab blocks (subtle relief)
-    [[-0.10, 1.18], [0.10, 1.18], [-0.10, 0.98], [0.10, 0.98], [-0.10, 0.80], [0.10, 0.80]].forEach(([x, y]) =>
-      mesh(new THREE.SphereGeometry(0.085, 16, 12), [x, y, 0.30], 1, 1, 0.7));
-    mesh(new THREE.SphereGeometry(0.40, 34, 26), [0, 0.50, 0], 1.10, 0.62, 0.66);     // pelvis / hips
-
-    // ── shoulders & arms ──
-    mesh(new THREE.SphereGeometry(0.215, 28, 22), [-0.70, 1.74, 0], 1.05, 1, 1.05);   // left deltoid
-    mesh(new THREE.SphereGeometry(0.215, 28, 22), [0.70, 1.74, 0], 1.05, 1, 1.05);    // right deltoid
-    mesh(new THREE.CapsuleGeometry(0.135, 0.62, 16, 26), [-0.80, 1.26, 0], 1, 1, 0.95, 0, 0, -0.16); // L upper arm (biceps)
-    mesh(new THREE.CapsuleGeometry(0.135, 0.62, 16, 26), [0.80, 1.26, 0], 1, 1, 0.95, 0, 0, 0.16);   // R upper arm
-    mesh(new THREE.SphereGeometry(0.115, 18, 14), [-0.93, 0.78, 0]);                   // L elbow
-    mesh(new THREE.SphereGeometry(0.115, 18, 14), [0.93, 0.78, 0]);                    // R elbow
-    mesh(new THREE.CapsuleGeometry(0.105, 0.60, 14, 24), [-1.00, 0.30, 0], 1, 1, 0.9, 0, 0, 0.10);   // L forearm
-    mesh(new THREE.CapsuleGeometry(0.105, 0.60, 14, 24), [1.00, 0.30, 0], 1, 1, 0.9, 0, 0, -0.10);    // R forearm
-    mesh(new THREE.SphereGeometry(0.11, 18, 14), [-1.05, -0.10, 0.02], 1.05, 1.25, 0.55); // L hand
-    mesh(new THREE.SphereGeometry(0.11, 18, 14), [1.05, -0.10, 0.02], 1.05, 1.25, 0.55);  // R hand
-
-    // ── legs ──
-    mesh(new THREE.SphereGeometry(0.21, 26, 20), [-0.22, 0.16, 0], 1, 1.2, 1);        // L glute/quad top
-    mesh(new THREE.SphereGeometry(0.21, 26, 20), [0.22, 0.16, 0], 1, 1.2, 1);         // R glute/quad top
-    mesh(new THREE.CapsuleGeometry(0.185, 0.92, 18, 30), [-0.24, -0.42, 0], 1, 1, 0.92, 0, 0, 0.04);  // L thigh
-    mesh(new THREE.CapsuleGeometry(0.185, 0.92, 18, 30), [0.24, -0.42, 0], 1, 1, 0.92, 0, 0, -0.04);  // R thigh
-    mesh(new THREE.SphereGeometry(0.155, 20, 16), [-0.26, -1.10, 0.02], 0.95, 0.9, 0.8); // L knee
-    mesh(new THREE.SphereGeometry(0.155, 20, 16), [0.26, -1.10, 0.02], 0.95, 0.9, 0.8);  // R knee
-    mesh(new THREE.CapsuleGeometry(0.135, 0.80, 16, 26), [-0.26, -1.66, 0], 1, 1, 0.85);  // L calf
-    mesh(new THREE.CapsuleGeometry(0.135, 0.80, 16, 26), [0.26, -1.66, 0], 1, 1, 0.85);   // R calf
-    mesh(new THREE.CapsuleGeometry(0.09, 0.34, 12, 20), [-0.27, -2.22, 0], 1, 1, 0.85);   // L ankle
-    mesh(new THREE.CapsuleGeometry(0.09, 0.34, 12, 20), [0.27, -2.22, 0], 1, 1, 0.85);    // R ankle
-    mesh(new THREE.BoxGeometry(0.24, 0.12, 0.50), [-0.27, -2.52, 0.12], 1, 1, 1, -0.1, 0, 0);  // L foot
-    mesh(new THREE.BoxGeometry(0.24, 0.12, 0.50), [0.27, -2.52, 0.12], 1, 1, 1, -0.1, 0, 0);   // R foot
-
-    // tumor site — heat-map layers (no floating blob, glows from inside body surface)
-    const tumorPos = new THREE.Vector3(0.10, 1.30, 0.30);
+    // heat-map glow at the modeled tumor site (added once the model frames it)
     const glowMats = [
       new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.0, depthWrite: false }),
       new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.0, depthWrite: false }),
     ];
-    const glowOuter = new THREE.Mesh(new THREE.SphereGeometry(0.52, 32, 24), glowMats[0]);
-    glowOuter.position.copy(tumorPos); root.add(glowOuter);
-    const glowCore = new THREE.Mesh(new THREE.SphereGeometry(0.26, 28, 20), glowMats[1]);
-    glowCore.position.copy(tumorPos); root.add(glowCore);
+    const glowOuter = new THREE.Mesh(new THREE.SphereGeometry(0.55, 32, 24), glowMats[0]);
+    const glowCore = new THREE.Mesh(new THREE.SphereGeometry(0.28, 28, 20), glowMats[1]);
+    const tumorLight = new THREE.PointLight(0xf97316, 0, 4);
 
-    // warm point light at tumor site to illuminate body surface
-    const tumorLight = new THREE.PointLight(0xf97316, 0, 3.5);
-    tumorLight.position.copy(tumorPos); root.add(tumorLight);
+    // ── load the real, rigged human body ──
+    let mixer = null;
+    const loader = new GLTFLoader();
+    loader.load(
+      import.meta.env.BASE_URL + "models/Xbot.glb",
+      (gltf) => {
+        const model = gltf.scene;
+        model.traverse((o) => {
+          if (o.isMesh) {
+            o.material = bodyMat;
+            o.castShadow = true;
+            o.receiveShadow = true;
+            o.frustumCulled = false;
+          }
+        });
+
+        // center the model and scale it to a consistent on-screen height
+        const box = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3(); box.getSize(size);
+        const center = new THREE.Vector3(); box.getCenter(center);
+        const targetH = 4.4;
+        const s = targetH / size.y;
+        model.scale.setScalar(s);
+        model.position.set(-center.x * s, -center.y * s, -center.z * s);
+        root.add(model);
+
+        // place the glow at the chest, relative to the framed body
+        const chest = new THREE.Vector3(size.x * s * 0.08, size.y * s * 0.18, size.z * s * 0.55);
+        glowOuter.position.copy(chest);
+        glowCore.position.copy(chest);
+        tumorLight.position.copy(chest);
+        root.add(glowOuter, glowCore, tumorLight);
+
+        // subtle idle motion so it reads as alive, not a statue
+        if (gltf.animations && gltf.animations.length) {
+          mixer = new THREE.AnimationMixer(model);
+          const idle = gltf.animations.find((c) => /idle/i.test(c.name)) || gltf.animations[0];
+          mixer.clipAction(idle).play();
+        }
+      },
+      undefined,
+      (err) => { console.error("twin model failed to load", err); },
+    );
 
     // scene lighting
     scene.add(new THREE.AmbientLight(0xe8f0f4, 0.85));
@@ -308,7 +298,7 @@ function BodyTwin3D({ med90 }) {
     canvas.addEventListener("wheel", onWheel, { passive: false });
 
     const clock = new THREE.Clock();
-    let frameId = 0;
+    let frameId = 0, lastT = 0;
     function resize() {
       const w = mount.clientWidth || 340, h = mount.clientHeight || 480;
       renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
@@ -316,6 +306,8 @@ function BodyTwin3D({ med90 }) {
 
     function render() {
       const t = clock.getElapsedTime();
+      const dt = t - lastT; lastT = t;
+      if (mixer) mixer.update(dt);
 
       // smooth zoom
       const tz = zoomRef.current;
