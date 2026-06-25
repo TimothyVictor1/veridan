@@ -18,9 +18,10 @@
   --rose: #be123c;
   --blue: #2563eb;
   --violet: #6d28d9;
-  --shadow: 0 20px 52px rgba(31, 64, 88, 0.12);
-  --shadow-soft: 0 12px 30px rgba(31, 64, 88, 0.08);
-  --radius: 8px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.85) inset, 0 24px 60px -28px rgba(31, 64, 88, 0.28);
+  --shadow-soft: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 16px 38px -22px rgba(31, 64, 88, 0.22);
+  --radius: 14px;
+  --radius-sm: 10px;
 }
 
 @layer base {
@@ -1498,8 +1499,19 @@
   border: 1px solid rgba(214, 232, 238, 0.95);
   border-radius: var(--radius);
   background: linear-gradient(180deg, #ffffff, #fbfdfe);
-  box-shadow: 0 16px 38px rgba(31, 64, 88, 0.08);
+  box-shadow: var(--shadow-soft);
   padding: 0.86rem;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(8, 145, 178, 0.34);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset, 0 24px 50px -24px rgba(31, 64, 88, 0.3);
+}
+
+.stat-card-accent:hover {
+  border-color: rgba(249, 115, 22, 0.5);
 }
 
 .stat-card::after {
