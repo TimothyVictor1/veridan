@@ -1,5 +1,5 @@
 import React, { Suspense, useMemo, useRef } from "react";
-import { Canvas, useFrame, useLoader } from "@react-three/fiber";
+import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { Float, Line } from "@react-three/drei";
 import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
@@ -9,11 +9,11 @@ const MODEL_URL = "/human-model.fbx";
 const TARGET_HEIGHT = 3.62;
 
 const PALETTES = {
-  scanning: { body: "#78909a", glow: "#ff7a1a", soft: "#ffd2b5", core: "#f97316", anomaly: "#ff4f1a", rgb: [0.45, 0.56, 0.6] },
-  ready: { body: "#7f949d", glow: "#fb6a16", soft: "#ffc9ad", core: "#ea580c", anomaly: "#ff5a1f", rgb: [0.48, 0.57, 0.6] },
-  testing: { body: "#f97316", glow: "#fb5b12", soft: "#fed7aa", core: "#111111", anomaly: "#ff3d16", rgb: [0.9, 0.3, 0.08] },
-  passed: { body: "#ea580c", glow: "#fb923c", soft: "#ffedd5", core: "#111111", anomaly: "#f97316", rgb: [0.82, 0.26, 0.05] },
-  failed: { body: "#b91c1c", glow: "#ef4444", soft: "#fecaca", core: "#111111", anomaly: "#dc2626", rgb: [0.72, 0.12, 0.1] },
+  scanning: { body: "#dbe7ec", glow: "#0ea5e9", soft: "#dff7ff", core: "#0284c7", anomaly: "#38bdf8", risk: "#fb7185", rgb: [0.54, 0.82, 0.94] },
+  ready: { body: "#e8eef2", glow: "#38bdf8", soft: "#effbff", core: "#0891b2", anomaly: "#22d3ee", risk: "#fb7185", rgb: [0.58, 0.83, 0.93] },
+  testing: { body: "#edf7fb", glow: "#38bdf8", soft: "#ecfeff", core: "#0ea5e9", anomaly: "#67e8f9", risk: "#fb7185", rgb: [0.72, 0.88, 0.95] },
+  passed: { body: "#e6f5ee", glow: "#10b981", soft: "#ecfdf5", core: "#059669", anomaly: "#22c55e", rgb: [0.56, 0.86, 0.72] },
+  failed: { body: "#fff1f2", glow: "#ef4444", soft: "#fee2e2", core: "#be123c", anomaly: "#dc2626", rgb: [0.86, 0.42, 0.44] },
 };
 
 const SPINE = [[0, 0.18, 0.03], [0, 0.7, 0.03], [0, 1.22, 0.04], [0, 1.78, 0.05], [0, 2.35, 0.04], [0, 2.86, 0.03], [0, 3.22, 0.02]];
@@ -68,7 +68,7 @@ function normalizeLayer(source, material, renderOrder = 0) {
   return clone;
 }
 
-function createSurfacePointGeometry(source, maxPoints = 12000) {
+function createSurfacePointGeometry(source, maxPoints = 7200) {
   const { box, center, scale } = modelTransform(source);
   const vectors = [];
   let total = 0;
@@ -98,14 +98,14 @@ function createSurfacePointGeometry(source, maxPoints = 12000) {
 
 function createGlassMaterial() {
   return new THREE.MeshPhysicalMaterial({
-    color: "#d8e1e3",
-    emissive: "#fb6a16",
-    emissiveIntensity: 0.12,
-    metalness: 0.03,
-    roughness: 0.22,
-    transmission: 0.18,
+    color: "#dfe9ee",
+    emissive: "#7dd3fc",
+    emissiveIntensity: 0.11,
+    metalness: 0.18,
+    roughness: 0.16,
+    transmission: 0.22,
     transparent: true,
-    opacity: 0.24,
+    opacity: 0.38,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
@@ -122,6 +122,7 @@ function createTwinShaderMaterial() {
       uColor: { value: new THREE.Vector3(0.04, 0.52, 0.62) },
       uOpacity: { value: 0.28 },
       uGlitch: { value: 0 },
+      uScan: { value: 1 },
     },
     vertexShader: `
       varying vec3 vNormal;
@@ -147,12 +148,13 @@ function createTwinShaderMaterial() {
       uniform float uTime;
       uniform vec3 uColor;
       uniform float uOpacity;
+      uniform float uScan;
 
       void main() {
         vec3 viewDir = normalize(cameraPosition - vWorldPosition);
         float fresnel = pow(1.0 - abs(dot(viewDir, normalize(vNormal))), 2.05);
         float scanY = fract(vWorldPosition.y * 0.34 - uTime * 0.5);
-        float scanLine = smoothstep(0.0, 0.016, scanY) * smoothstep(0.052, 0.016, scanY);
+        float scanLine = smoothstep(0.0, 0.016, scanY) * smoothstep(0.052, 0.016, scanY) * uScan;
         float contours = abs(sin(vWorldPosition.y * 90.0)) * 0.065;
         float alpha = clamp(fresnel * uOpacity + scanLine * 0.28 + contours, 0.0, 0.82);
         vec3 color = uColor * (0.62 + fresnel * 1.7) + scanLine * vec3(0.9, 1.0, 1.0);
@@ -174,18 +176,16 @@ function HumanDigitalTwin({ phase }) {
     const glassMaterial = createGlassMaterial();
     const shaderMaterial = createTwinShaderMaterial();
     const wireMaterial = new THREE.MeshBasicMaterial({
-      color: "#fb6a16",
+      color: "#38bdf8",
       wireframe: true,
       transparent: true,
-      opacity: 0.06,
+      opacity: 0.055,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
-
     glassRef.current = glassMaterial;
     shaderRef.current = shaderMaterial;
     wireRef.current = wireMaterial;
-
     return {
       glassLayer: normalizeLayer(model, glassMaterial, 1),
       scanLayer: normalizeLayer(model, shaderMaterial, 2),
@@ -205,9 +205,9 @@ function HumanDigitalTwin({ phase }) {
     }
 
     if (glassRef.current) {
-      glassRef.current.color.lerp(new THREE.Color(phase === "failed" ? "#ffe0dc" : "#d8e1e3"), 0.05);
+      glassRef.current.color.lerp(new THREE.Color(phase === "failed" ? "#fff1f2" : palette.body), 0.05);
       glassRef.current.emissive.lerp(new THREE.Color(palette.glow), 0.05);
-      glassRef.current.opacity = phase === "passed" ? 0.2 : phase === "testing" ? 0.27 : 0.24;
+      glassRef.current.opacity = phase === "passed" ? 0.28 : phase === "testing" ? 0.36 : 0.32;
     }
 
     if (shaderRef.current) {
@@ -215,16 +215,18 @@ function HumanDigitalTwin({ phase }) {
       shaderRef.current.uniforms.uColor.value.lerp(new THREE.Vector3(...palette.rgb), 0.05);
       shaderRef.current.uniforms.uOpacity.value = phase === "passed" ? 0.22 : phase === "failed" ? 0.31 : 0.29;
       shaderRef.current.uniforms.uGlitch.value = phase === "testing" && Math.sin(time * 10.5) > 0.84 ? 1 : 0;
+      shaderRef.current.uniforms.uScan.value = phase === "scanning" || phase === "testing" ? 1 : 0;
     }
+
 
     if (wireRef.current) {
       wireRef.current.color.lerp(new THREE.Color(palette.glow), 0.05);
-      wireRef.current.opacity = phase === "testing" ? 0.09 : 0.058;
+      wireRef.current.opacity = phase === "testing" ? 0.09 : phase === "ready" ? 0.06 : 0.052;
     }
 
     if (pointRef.current) {
       pointRef.current.material.color.lerp(new THREE.Color(palette.soft), 0.05);
-      pointRef.current.material.opacity = phase === "testing" ? 0.52 : 0.36;
+      pointRef.current.material.opacity = phase === "ready" ? 0.26 : phase === "testing" ? 0.5 : 0.34;
     }
   });
 
@@ -234,7 +236,7 @@ function HumanDigitalTwin({ phase }) {
       <primitive object={scanLayer} />
       <primitive object={wireLayer} />
       <points ref={pointRef} geometry={pointGeometry}>
-        <pointsMaterial color="#ffd2b5" opacity={0.36} size={0.011} sizeAttenuation transparent depthWrite={false} />
+        <pointsMaterial color="#dff6ff" opacity={0.34} size={0.0105} sizeAttenuation transparent depthWrite={false} />
       </points>
     </group>
   );
@@ -257,7 +259,7 @@ function createOrbitPoints(count) {
   return { positions, speeds };
 }
 
-function NanobotParticles({ phase, count = 620 }) {
+function NanobotParticles({ phase, count = 280 }) {
   const ref = useRef();
   const { positions, speeds } = useMemo(() => createOrbitPoints(count), [count]);
   const geometry = useMemo(() => {
@@ -269,16 +271,20 @@ function NanobotParticles({ phase, count = 620 }) {
   useFrame(() => {
     if (!ref.current) return;
     const attr = ref.current.geometry.attributes.position;
+    const data = attr.array;
     const speed = phase === "testing" ? 1.75 : 1;
 
     for (let index = 0; index < speeds.length; index += 1) {
-      const x = attr.getX(index);
-      const z = attr.getZ(index);
+      const offset = index * 3;
+      const x = data[offset];
+      const z = data[offset + 2];
       const radius = Math.sqrt(x * x + z * z);
       const angle = Math.atan2(z, x) + 0.01 * speed * speeds[index];
-      let y = attr.getY(index) + 0.0058 * speed * speeds[index];
+      let y = data[offset + 1] + 0.0058 * speed * speeds[index];
       if (y > 3.58) y = 0.08;
-      attr.setXYZ(index, Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+      data[offset] = Math.cos(angle) * radius;
+      data[offset + 1] = y;
+      data[offset + 2] = Math.sin(angle) * radius;
     }
 
     attr.needsUpdate = true;
@@ -296,8 +302,8 @@ function TreatmentStream({ phase }) {
   const ref = useRef();
   const positions = useMemo(() => {
     const random = seededRandom(122);
-    const data = new Float32Array(240 * 3);
-    for (let index = 0; index < 240; index += 1) {
+    const data = new Float32Array(104 * 3);
+    for (let index = 0; index < 104; index += 1) {
       data[index * 3] = -2.15 - random() * 0.5;
       data[index * 3 + 1] = 1.7 + random() * 0.92;
       data[index * 3 + 2] = -0.12 + random() * 0.24;
@@ -314,14 +320,16 @@ function TreatmentStream({ phase }) {
   useFrame((state) => {
     if (!ref.current || phase !== "testing") return;
     const attr = ref.current.geometry.attributes.position;
+    const data = attr.array;
     const time = state.clock.elapsedTime;
 
     for (let index = 0; index < attr.count; index += 1) {
-      let x = attr.getX(index) + 0.04 + (index % 7) * 0.001;
+      const offset = index * 3;
+      let x = data[offset] + 0.04 + (index % 7) * 0.001;
       if (x > 0.22) x = -2.16 - (index % 9) * 0.036;
-      const y = 1.7 + Math.sin(time * 2.5 + index * 0.14) * 0.36 + (index % 6) * 0.03;
-      const z = 0.16 + Math.cos(time * 3.4 + index) * 0.16;
-      attr.setXYZ(index, x, y, z);
+      data[offset] = x;
+      data[offset + 1] = 1.7 + Math.sin(time * 2.5 + index * 0.14) * 0.36 + (index % 6) * 0.03;
+      data[offset + 2] = 0.16 + Math.cos(time * 3.4 + index) * 0.16;
     }
 
     attr.needsUpdate = true;
@@ -331,39 +339,51 @@ function TreatmentStream({ phase }) {
 
   return (
     <points ref={ref} geometry={geometry}>
-      <pointsMaterial color="#fb5b12" opacity={0.9} size={0.026} sizeAttenuation transparent depthWrite={false} />
+      <pointsMaterial color="#06b6d4" opacity={0.9} size={0.026} sizeAttenuation transparent depthWrite={false} />
     </points>
   );
 }
 
-function AnomalyMarker({ phase }) {
+function AnomalyMarker({ phase, disease }) {
   const groupRef = useRef();
   const palette = paletteFor(phase);
+  const marker = disease?.marker || [0.09, 2.2, 0.22];
 
   useFrame((state) => {
     if (!groupRef.current) return;
+    if (phase !== "testing") {
+      groupRef.current.scale.setScalar(1);
+      groupRef.current.rotation.z = 0;
+      return;
+    }
     const time = state.clock.elapsedTime;
-    groupRef.current.scale.setScalar(1 + Math.sin(time * (phase === "testing" ? 7 : 3.2)) * 0.18);
+    groupRef.current.scale.setScalar(1 + Math.sin(time * 7) * 0.18);
     groupRef.current.rotation.z = time * 0.35;
   });
 
+  if (phase === "scanning") return null;
+
+  const signalColor = phase === "failed" ? palette.anomaly : phase === "passed" ? "#22c55e" : palette.risk || "#fb7185";
+  const haloColor = phase === "failed" ? "#fecdd3" : phase === "passed" ? "#86efac" : palette.anomaly;
+  const opacity = phase === "passed" ? 0.16 : phase === "failed" ? 0.4 : 0.3;
+
   return (
-    <group ref={groupRef} position={[0.09, 2.2, 0.22]}>
-      <mesh>
-        <sphereGeometry args={[0.105, 20, 20]} />
-        <meshBasicMaterial color={palette.anomaly} opacity={phase === "passed" ? 0.2 : 0.48} transparent depthWrite={false} />
-      </mesh>
+    <group ref={groupRef} position={marker}>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.17, 0.005, 8, 56]} />
-        <meshBasicMaterial color={palette.anomaly} opacity={phase === "passed" ? 0.18 : 0.5} transparent depthWrite={false} />
+        <torusGeometry args={[0.12, 0.0035, 8, 64]} />
+        <meshBasicMaterial color={signalColor} opacity={phase === "passed" ? 0.18 : 0.56} transparent depthWrite={false} blending={THREE.AdditiveBlending} />
       </mesh>
-      <mesh rotation={[Math.PI / 3, 0.3, 0]}>
-        <torusGeometry args={[0.27, 0.003, 8, 64]} />
-        <meshBasicMaterial color={palette.anomaly} opacity={phase === "passed" ? 0.08 : 0.24} transparent depthWrite={false} />
+      <mesh rotation={[Math.PI / 2.5, 0.32, 0.1]}>
+        <torusGeometry args={[0.2, 0.0026, 8, 72]} />
+        <meshBasicMaterial color={haloColor} opacity={opacity} transparent depthWrite={false} blending={THREE.AdditiveBlending} />
       </mesh>
-      <mesh>
-        <sphereGeometry args={[0.34, 18, 18]} />
-        <meshBasicMaterial color={palette.anomaly} opacity={phase === "passed" ? 0.03 : 0.075} transparent depthWrite={false} />
+      <mesh rotation={[Math.PI / 3, -0.44, 0.2]}>
+        <torusGeometry args={[0.29, 0.002, 8, 88]} />
+        <meshBasicMaterial color={haloColor} opacity={phase === "passed" ? 0.08 : 0.18} transparent depthWrite={false} blending={THREE.AdditiveBlending} />
+      </mesh>
+      <mesh rotation={[0.2, 0.6, 0]}>
+        <ringGeometry args={[0.035, 0.048, 40]} />
+        <meshBasicMaterial color="#ffffff" opacity={phase === "passed" ? 0.12 : 0.42} transparent side={THREE.DoubleSide} depthWrite={false} blending={THREE.AdditiveBlending} />
       </mesh>
     </group>
   );
@@ -409,19 +429,19 @@ function ProjectionBase({ phase }) {
   return (
     <group position={[0, 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
       <mesh ref={ringA}>
-        <torusGeometry args={[0.92, 0.006, 8, 104]} />
+        <torusGeometry args={[0.92, 0.006, 8, 72]} />
         <meshBasicMaterial color={palette.glow} opacity={0.43} transparent depthWrite={false} />
       </mesh>
       <mesh ref={ringB}>
-        <torusGeometry args={[0.68, 0.004, 8, 86]} />
-        <meshBasicMaterial color="#fb923c" opacity={0.2} transparent depthWrite={false} />
+        <torusGeometry args={[0.68, 0.004, 8, 64]} />
+        <meshBasicMaterial color="#7dd3fc" opacity={0.16} transparent depthWrite={false} />
       </mesh>
       <mesh ref={ringC}>
         <torusGeometry args={[0.44, 0.003, 8, 72]} />
-        <meshBasicMaterial color="#8a817a" opacity={0.16} transparent depthWrite={false} />
+        <meshBasicMaterial color="#94a3b8" opacity={0.12} transparent depthWrite={false} />
       </mesh>
       <mesh>
-        <circleGeometry args={[1, 104]} />
+        <circleGeometry args={[1, 72]} />
         <meshBasicMaterial color={palette.soft} opacity={0.11} transparent side={THREE.DoubleSide} depthWrite={false} />
       </mesh>
     </group>
@@ -449,35 +469,6 @@ function ScanSlice({ active, phase }) {
   );
 }
 
-function DataHelix({ phase }) {
-  const ref = useRef();
-  const palette = paletteFor(phase);
-  const count = 158;
-
-  const geometry = useMemo(() => {
-    const positions = new Float32Array(count * 3);
-    for (let index = 0; index < count; index += 1) {
-      const theta = (index / count) * Math.PI * 7;
-      positions[index * 3] = Math.cos(theta) * 1.12;
-      positions[index * 3 + 1] = 0.1 + (index / count) * 3.42;
-      positions[index * 3 + 2] = Math.sin(theta) * 1.12;
-    }
-    const helixGeometry = new THREE.BufferGeometry();
-    helixGeometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-    return helixGeometry;
-  }, []);
-
-  useFrame((state) => {
-    if (ref.current) ref.current.rotation.y = state.clock.elapsedTime * 0.12;
-  });
-
-  return (
-    <points ref={ref} geometry={geometry}>
-      <pointsMaterial color={palette.glow} opacity={0.24} size={0.014} sizeAttenuation transparent depthWrite={false} />
-    </points>
-  );
-}
-
 function ChamberGuides({ phase }) {
   const palette = paletteFor(phase);
   return (
@@ -488,7 +479,7 @@ function ChamberGuides({ phase }) {
       </mesh>
       {[0.56, 1.36, 2.16, 2.96, 3.48].map((y) => (
         <mesh key={y} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[0.76, 0.0025, 6, 78]} />
+          <torusGeometry args={[0.76, 0.0025, 6, 60]} />
           <meshBasicMaterial color={palette.glow} opacity={0.1} transparent depthWrite={false} />
         </mesh>
       ))}
@@ -505,36 +496,47 @@ function LoadingFallback() {
   return (
     <mesh ref={ref} position={[0, 1.72, 0]}>
       <torusGeometry args={[0.34, 0.018, 8, 48]} />
-      <meshBasicMaterial color="#fb6a16" opacity={0.44} transparent depthWrite={false} />
+      <meshBasicMaterial color="#38bdf8" opacity={0.44} transparent depthWrite={false} />
     </mesh>
   );
 }
 
-function Scene({ phase }) {
+function CameraAim() {
+  const { camera } = useThree();
+  useFrame(() => {
+    camera.lookAt(0, 0.42, 0);
+  });
+  return null;
+}
+
+function Scene({ phase, patient }) {
+  const isGenerating = phase === "scanning";
+  const isTesting = phase === "testing";
+  const disease = patient?.disease;
+
   return (
     <>
       <ambientLight intensity={0.95} />
       <directionalLight position={[2.4, 4.4, 4.2]} intensity={0.65} color="#ffffff" />
-      <pointLight position={[-2.2, 2.2, 3.4]} intensity={0.64} color="#ffd2b5" />
-      <pointLight position={[1.8, 0.2, 2.2]} intensity={0.34} color="#fbbf24" />
+      <pointLight position={[-2.2, 2.2, 3.4]} intensity={0.64} color="#dff6ff" />
+      <pointLight position={[1.8, 0.2, 2.2]} intensity={0.34} color="#bae6fd" />
 
-      <group position={[0, -1.05, 0]}>
-        <group position={[0, -0.1, 0]} scale={[0.82, 0.82, 0.82]}>
-          <Float speed={0.62} rotationIntensity={0} floatIntensity={0.11} floatingRange={[-0.03, 0.03]}>
+      <group position={[0, -1.34, 0]}>
+        <group position={[0, -0.06, 0]} scale={[0.96, 0.96, 0.96]}>
+          <Float speed={0.62} rotationIntensity={0} floatIntensity={isGenerating || isTesting ? 0.08 : 0} floatingRange={[-0.02, 0.02]}>
             <Suspense fallback={<LoadingFallback />}>
               <HumanDigitalTwin phase={phase} />
             </Suspense>
             <AnatomicalGuides phase={phase} />
-            <AnomalyMarker phase={phase} />
+            <AnomalyMarker phase={phase} disease={disease} />
           </Float>
         </group>
 
-        <ChamberGuides phase={phase} />
-        <NanobotParticles phase={phase} />
-        <DataHelix phase={phase} />
+        {(isGenerating || isTesting) && <ChamberGuides phase={phase} />}
+        {isGenerating && <NanobotParticles phase={phase} />}
         <TreatmentStream phase={phase} />
-        <ProjectionBase phase={phase} />
-        <ScanSlice active={phase === "scanning"} phase={phase} />
+        {(isGenerating || isTesting) && <ProjectionBase phase={phase} />}
+        <ScanSlice active={isGenerating} phase={phase} />
       </group>
     </>
   );
@@ -558,19 +560,22 @@ class CanvasErrorBoundary extends React.Component {
   }
 }
 
-export default function HolographicBodyScene({ phase }) {
+export default function HolographicBodyScene({ phase, patient }) {
   return (
     <CanvasErrorBoundary>
       <Canvas
-        camera={{ position: [0, 1.84, 8.65], fov: 38 }}
-        dpr={[1, 1.75]}
-        gl={{ alpha: true, antialias: true, powerPreference: "high-performance", failIfMajorPerformanceCaveat: false, preserveDrawingBuffer: true }}
+        camera={{ position: [0, 1.18, 7.35], fov: 40 }}
+        dpr={[1, 1.2]}
+        gl={{ alpha: true, antialias: false, powerPreference: "high-performance", failIfMajorPerformanceCaveat: false, stencil: false }}
         style={{ background: "transparent" }}
       >
-        <Scene phase={phase} />
-        <EffectComposer multisampling={0}>
-          <Bloom intensity={0.25} luminanceThreshold={0.14} luminanceSmoothing={0.76} mipmapBlur />
-        </EffectComposer>
+        <CameraAim />
+        <Scene phase={phase} patient={patient} />
+        {(phase === "testing" || phase === "passed" || phase === "failed") && (
+          <EffectComposer multisampling={0}>
+            <Bloom intensity={phase === "testing" ? 0.22 : 0.16} luminanceThreshold={0.16} luminanceSmoothing={0.72} />
+          </EffectComposer>
+        )}
       </Canvas>
     </CanvasErrorBoundary>
   );
